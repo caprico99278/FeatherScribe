@@ -120,7 +120,6 @@ public sealed class DictationController
                 ActiveMode = null;
                 _stopRecordingCts?.Dispose();
                 _stopRecordingCts = null;
-                LastFormattedResult = null;
                 if (result is { Success: true, Text: not null })
                 {
                     LastResult = result.Text;

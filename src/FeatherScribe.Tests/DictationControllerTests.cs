@@ -31,6 +31,27 @@ public class DictationControllerTests
         }
     }
 
+    private sealed class GatedSpeechToText(string text) : ISpeechToTextEngine
+    {
+        private readonly TaskCompletionSource _started = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public void Release() => _release.TrySetResult();
+
+        public async Task<TranscriptionResult> TranscribeAsync(
+            AudioFile audioFile,
+            CancellationToken cancellationToken)
+        {
+            _started.TrySetResult();
+            await _release.Task.WaitAsync(cancellationToken);
+            return new TranscriptionResult(text, TimeSpan.Zero, true, null);
+        }
+    }
+
     private sealed class DelayedFirstFormatter(
         Task<FormatResult> firstResult,
         TaskCompletionSource firstFormattingStarted) : ITextFormatter
@@ -154,6 +175,48 @@ public class DictationControllerTests
         Assert.Null(controller.LastFormattedResult);
     }
 
+    [Fact]
+    public async Task RawFirstCompletion_DoesNotClearFormattedResultSetByBackgroundCompletion()
+    {
+        var settings = new AppSettings
+        {
+            Llm = new LlmSettings { Enabled = true, RawFirstPaste = true },
+        };
+        var speechToText = new GatedSpeechToText("raw text");
+        var backgroundFormatResult = new TaskCompletionSource<FormatResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var pipeline = new DictationPipeline(
+            new FakeRecorder(),
+            speechToText,
+            new DelayedFirstFormatter(
+                backgroundFormatResult.Task,
+                new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)),
+            new DictionaryCorrector([]),
+            new CapturingOutput(),
+            new EmptyDictionaryProvider(),
+            new NullEventLog(),
+            settings);
+        var controller = new DictationController(pipeline, settings);
+
+        var completed = ListenCompleted(controller);
+        controller.Toggle(FormattingMode.PlainFast);
+        await speechToText.Started.WaitAsync(EventTimeout);
+
+        var operationId = GetLatestOperationId(controller);
+        PublishBackgroundCompletion(controller, new BackgroundFormattingResult(
+            operationId, FormattingMode.PlainFast, "formatted first", null));
+        Assert.Equal("formatted first", controller.LastFormattedResult);
+
+        speechToText.Release();
+        var result = await completed.WaitAsync(EventTimeout);
+
+        Assert.True(result.BackgroundFormattingStarted);
+        Assert.Equal(operationId, result.OperationId);
+        Assert.Equal("formatted first", controller.LastFormattedResult);
+
+        backgroundFormatResult.SetResult(new FormatResult("formatted later", false, null));
+    }
+
     private static Task<PipelineResult> ListenCompleted(DictationController controller)
     {
         var tcs = new TaskCompletionSource<PipelineResult>(
@@ -194,5 +257,25 @@ public class DictationControllerTests
 
         controller.BackgroundFormattingCompleted += Handler;
         return tcs.Task;
+    }
+
+    private static Guid GetLatestOperationId(DictationController controller)
+    {
+        var field = typeof(DictationController).GetField(
+            "_latestOperationId",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return (Guid)field.GetValue(controller)!;
+    }
+
+    private static void PublishBackgroundCompletion(
+        DictationController controller,
+        BackgroundFormattingResult result)
+    {
+        var method = typeof(DictationController).GetMethod(
+            "OnBackgroundFormattingCompleted",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method.Invoke(controller, [result]);
     }
 }
