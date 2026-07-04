@@ -1,0 +1,10 @@
+<Window x:Class="FeatherScribe.App.RecordingOverlay"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ShowActivated="False"
+        SizeToContent="WidthAndHeight" ResizeMode="NoResize">
+    <Border x:Name="Pill" CornerRadius="14" Padding="16,8" Background="#DD222222">
+        <TextBlock x:Name="OverlayText" Foreground="White" FontSize="14" FontWeight="Bold"/>
+    </Border>
+</Window>

@@ -1,56 +1,38 @@
-# Prerequisites
-*.d
-
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
-
-# Linker output
+# Build outputs
+bin/
+obj/
+*.user
 *.ilk
-*.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-*.su
-*.idb
 *.pdb
+*.idb
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# Local runtime stack (binaries & models, multi-GB)
+local/
 
-# debug information files
-*.dwo
-/.vs/
+# Model files (never commit third-party models)
+models/
+*.gguf
+*.bin
+*.onnx
+
+# Generated audio & artifacts
+*.wav
+debug_artifacts/
+logs/
+
+# Sample generated artifacts: 原則コミットしない (実データ混入防止)。
+# 検証済みサンプルのみ明示的に許可する。
+samples/audio/*
+samples/raw/*
+samples/formatted/*
+!samples/audio/.gitkeep
+!samples/raw/.gitkeep
+!samples/formatted/.gitkeep
+!samples/raw/sample_001_raw.txt
+!samples/formatted/sample_001_formatted.txt
+
+# IDE
+.vs/
+.idea/
+.agents/
+.claude/

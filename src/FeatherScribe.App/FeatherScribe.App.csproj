@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <!-- WinForms の暗黙 using は WPF の Application 等と衝突するため外す -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FeatherScribe.Core\FeatherScribe.Core.csproj" />
+    <ProjectReference Include="..\FeatherScribe.Infrastructure\FeatherScribe.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\config\**\*" Link="config\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\..\doc\**\*" Link="doc\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\..\docs\**\*" Link="docs\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\..\prompts\**\*" Link="prompts\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\..\samples\**\*" Exclude="..\..\samples\audio\*.wav" Link="samples\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\..\tools\*.ps1" Link="tools\%(Filename)%(Extension)" />
+    <None Include="..\..\README.md" Link="README.md" />
+    <None Include="..\..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" />
+    <None Include="..\..\LICENSE" Link="LICENSE" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyTitle>FeatherScribe</AssemblyTitle>
+  </PropertyGroup>
+
+</Project>

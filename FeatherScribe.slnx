@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FeatherScribe.App/FeatherScribe.App.csproj" />
+    <Project Path="src/FeatherScribe.Core/FeatherScribe.Core.csproj" />
+    <Project Path="src/FeatherScribe.Infrastructure/FeatherScribe.Infrastructure.csproj" />
+    <Project Path="src/FeatherScribe.Tests/FeatherScribe.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/MakeSampleAudio/MakeSampleAudio.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,32 @@
+<Window x:Class="FeatherScribe.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FeatherScribe" Height="360" Width="520"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" x:Name="StatusText" Text="待機中" FontSize="16" FontWeight="Bold"/>
+
+        <TextBlock Grid.Row="1" x:Name="HotkeyHelpText" Margin="0,8,0,8"
+                   TextWrapping="Wrap" Foreground="Gray"/>
+
+        <GroupBox Grid.Row="2" Header="直近の結果">
+            <TextBox x:Name="LastResultText" IsReadOnly="True" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto" BorderThickness="0"/>
+        </GroupBox>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="RecopyButton" Content="再コピー" Padding="12,4" Margin="0,0,8,0"
+                    Click="RecopyButton_Click" IsEnabled="False"/>
+            <Button x:Name="RepasteButton" Content="再コピー+貼り付け" Padding="12,4"
+                    Click="RepasteButton_Click" IsEnabled="False"
+                    ToolTip="クリップボードへコピー後、フォーカスのある入力欄へ Ctrl+V を送信します"/>
+        </StackPanel>
+    </Grid>
+</Window>
