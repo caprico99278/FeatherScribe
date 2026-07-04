@@ -12,7 +12,6 @@ public partial class MainWindow : Window
 {
     private readonly DictationController _controller;
     private readonly ITextOutput _output;
-    private bool _allowClose;
 
     public MainWindow(DictationController controller, AppSettings settings, ITextOutput output)
     {
@@ -135,19 +134,11 @@ public partial class MainWindow : Window
     /// <summary>トレイの「終了」からのみ実際に閉じる。</summary>
     public void CloseForExit()
     {
-        _allowClose = true;
         Close();
     }
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        if (!_allowClose)
-        {
-            e.Cancel = true;
-            Hide();
-            return;
-        }
-
         base.OnClosing(e);
     }
 }
