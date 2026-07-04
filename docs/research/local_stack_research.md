@@ -38,7 +38,7 @@ whisper-cli.exe -m local/models/ggml-small.bin -l ja -t 4 --output-txt --output-
 ### 採用判断
 
 - **採用**: whisper.cpp v1.9.1 プリビルド + `ggml-small.bin` (466MB)
-- smallモデルで日本語の認識品質は十分 (「文字起こし」→「文字を越し押して」等の軽微な誤認識はあるが、Gemma 4整形で回復可能なレベル)
+- smallモデルで日本語の認識品質は実用候補 (「文字起こし」→「文字を越し押して」等の軽微な誤認識はある)。ただしGemma 4整形は意味回復を保証しないため、ASR精度・辞書補正・raw fallbackを前提に扱う。
 - 品質が必要なら `ggml-medium` 以上へ差し替え可能 (設定ファイルでパス変更のみ)
 
 ## 2. Gemma 4 + Ollama

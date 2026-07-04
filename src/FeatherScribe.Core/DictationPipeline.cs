@@ -21,10 +21,12 @@ public sealed record PipelineResult(
     bool BackgroundFormattingStarted,
     bool UsedFallback,
     bool OutputSucceeded,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    Guid OperationId = default);
 
 /// <param name="FormattedText">整形済みテキスト。失敗時は null。</param>
 public sealed record BackgroundFormattingResult(
+    Guid OperationId,
     FormattingMode Mode,
     string? FormattedText,
     string? ErrorMessage);
@@ -54,9 +56,6 @@ public sealed class DictationPipeline : IDisposable
     /// <summary>バックグラウンド整形の完了 (成功/失敗) 通知。ワーカースレッドから発火する。</summary>
     public event Action<BackgroundFormattingResult>? BackgroundFormattingCompleted;
 
-    /// <summary>直近のバックグラウンド整形成功結果 (再コピー/再貼り付け用)。</summary>
-    public string? LastBackgroundFormattedText { get; private set; }
-
     public DictationPipeline(
         IAudioRecorder recorder,
         ISpeechToTextEngine speechToText,
@@ -83,8 +82,10 @@ public sealed class DictationPipeline : IDisposable
     public async Task<PipelineResult> RunAsync(
         FormattingMode mode,
         CancellationToken stopRecording,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? operationId = null)
     {
+        var runId = operationId ?? Guid.NewGuid();
         var stopwatch = Stopwatch.StartNew();
         string? audioPath = null;
 
@@ -108,7 +109,7 @@ public sealed class DictationPipeline : IDisposable
                 LogEvent("transcribe", false, error, stopwatch.ElapsedMilliseconds, mode, charCount: 0);
                 StageChanged?.Invoke(PipelineStage.Failed, error);
                 // 指示書§12.1: ASR失敗時はクリップボードを変更しない
-                return new PipelineResult(false, null, false, false, false, $"文字起こしに失敗しました: {error}");
+                return new PipelineResult(false, null, false, false, false, $"文字起こしに失敗しました: {error}", runId);
             }
 
             LogEvent("transcribe", true, null, stopwatch.ElapsedMilliseconds, mode, transcription.RawText.Length);
@@ -125,7 +126,7 @@ public sealed class DictationPipeline : IDisposable
                     ? "LLM整形が無効設定 (llm.enabled=false) のため未整形で出力しました"
                     : null;
                 StageChanged?.Invoke(PipelineStage.Completed, note);
-                return new PipelineResult(true, corrected, false, false, ok, note ?? outputError);
+                return new PipelineResult(true, corrected, false, false, ok, note ?? outputError, runId);
             }
 
             var request = new FormatRequest(corrected, mode, _dictionaryProvider.Load());
@@ -140,9 +141,9 @@ public sealed class DictationPipeline : IDisposable
                 var (ok, outputError) = await TryOutputAsync(corrected, cancellationToken).ConfigureAwait(false);
                 LogEvent("output", ok, outputError, stopwatch.ElapsedMilliseconds, mode, corrected.Length);
 
-                StartBackgroundFormatting(request);
+                StartBackgroundFormatting(runId, request);
                 StageChanged?.Invoke(PipelineStage.Completed, "raw貼り付け完了・バックグラウンドで整形中");
-                return new PipelineResult(true, corrected, true, false, ok, outputError);
+                return new PipelineResult(true, corrected, true, false, ok, outputError, runId);
             }
 
             // 5b. 整形してから出力 (Polite/Bullet/Memo/DevInstruction、またはrawFirst無効時)
@@ -156,7 +157,7 @@ public sealed class DictationPipeline : IDisposable
                 // fallback禁止設定: 出力せず、結果は再コピー用に保持
                 StageChanged?.Invoke(PipelineStage.Failed, formatResult.ErrorMessage);
                 return new PipelineResult(false, corrected, false, true, false,
-                    formatResult.ErrorMessage ?? "整形に失敗しました (fallbackToRaw=false)");
+                    formatResult.ErrorMessage ?? "整形に失敗しました (fallbackToRaw=false)", runId);
             }
 
             var finalText = _corrector.Correct(formatResult.Text.Trim());
@@ -169,19 +170,19 @@ public sealed class DictationPipeline : IDisposable
                 formatResult.UsedFallback ? "整形失敗・未整形で出力しました" : null);
             return new PipelineResult(
                 true, finalText, false, formatResult.UsedFallback, outputOk,
-                formatResult.ErrorMessage ?? finalOutputError);
+                formatResult.ErrorMessage ?? finalOutputError, runId);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             LogEvent("pipeline", false, "canceled", stopwatch.ElapsedMilliseconds, mode, 0);
             StageChanged?.Invoke(PipelineStage.Failed, "キャンセルされました");
-            return new PipelineResult(false, null, false, false, false, "キャンセルされました");
+            return new PipelineResult(false, null, false, false, false, "キャンセルされました", runId);
         }
         catch (Exception ex)
         {
             LogEvent("pipeline", false, ex.GetType().Name, stopwatch.ElapsedMilliseconds, mode, 0);
             StageChanged?.Invoke(PipelineStage.Failed, ex.Message);
-            return new PipelineResult(false, null, false, false, false, ex.Message);
+            return new PipelineResult(false, null, false, false, false, ex.Message, runId);
         }
         finally
         {
@@ -194,7 +195,7 @@ public sealed class DictationPipeline : IDisposable
     /// パイプライン本体・次の録音をブロックしない。失敗してもアプリを落とさず、
     /// アプリ終了時 (Dispose) には安全にキャンセルされる。
     /// </summary>
-    private void StartBackgroundFormatting(FormatRequest request)
+    private void StartBackgroundFormatting(Guid operationId, FormatRequest request)
     {
         var lifetimeToken = _lifetimeCts.Token;
         _ = Task.Run(async () =>
@@ -210,16 +211,15 @@ public sealed class DictationPipeline : IDisposable
                     LogEvent("format_background", false, result.ErrorMessage,
                         stopwatch.ElapsedMilliseconds, request.Mode, 0);
                     BackgroundFormattingCompleted?.Invoke(new BackgroundFormattingResult(
-                        request.Mode, null, result.ErrorMessage ?? "整形に失敗しました"));
+                        operationId, request.Mode, null, result.ErrorMessage ?? "整形に失敗しました"));
                     return;
                 }
 
                 var formatted = _corrector.Correct(result.Text.Trim());
-                LastBackgroundFormattedText = formatted;
                 LogEvent("format_background", true, null,
                     stopwatch.ElapsedMilliseconds, request.Mode, formatted.Length);
                 BackgroundFormattingCompleted?.Invoke(new BackgroundFormattingResult(
-                    request.Mode, formatted, null));
+                    operationId, request.Mode, formatted, null));
             }
             catch (OperationCanceledException)
             {
@@ -230,7 +230,7 @@ public sealed class DictationPipeline : IDisposable
                 LogEvent("format_background", false, ex.GetType().Name,
                     stopwatch.ElapsedMilliseconds, request.Mode, 0);
                 BackgroundFormattingCompleted?.Invoke(new BackgroundFormattingResult(
-                    request.Mode, null, ex.Message));
+                    operationId, request.Mode, null, ex.Message));
             }
         }, CancellationToken.None);
     }

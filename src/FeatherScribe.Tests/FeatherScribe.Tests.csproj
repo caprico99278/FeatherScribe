@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\FeatherScribe.App\FeatherScribe.App.csproj" />
     <ProjectReference Include="..\FeatherScribe.Core\FeatherScribe.Core.csproj" />
     <ProjectReference Include="..\FeatherScribe.Infrastructure\FeatherScribe.Infrastructure.csproj" />
   </ItemGroup>

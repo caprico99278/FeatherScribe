@@ -13,7 +13,6 @@
 
   <ItemGroup>
     <None Include="..\..\config\**\*" Link="config\%(RecursiveDir)%(Filename)%(Extension)" />
-    <None Include="..\..\doc\**\*" Link="doc\%(RecursiveDir)%(Filename)%(Extension)" />
     <None Include="..\..\docs\**\*" Link="docs\%(RecursiveDir)%(Filename)%(Extension)" />
     <None Include="..\..\prompts\**\*" Link="prompts\%(RecursiveDir)%(Filename)%(Extension)" />
     <None Include="..\..\samples\**\*" Exclude="..\..\samples\audio\*.wav" Link="samples\%(RecursiveDir)%(Filename)%(Extension)" />

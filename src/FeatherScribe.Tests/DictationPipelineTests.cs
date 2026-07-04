@@ -208,7 +208,6 @@ public class DictationPipelineTests
         // 貼り付けられたのはrawのみ (自動置換禁止)。整形結果は保持のみ。
         Assert.Equal(["えーとこれはテストです"], output.Outputs);
         Assert.Equal("整形済み: えーとこれはテストです", background.FormattedText);
-        Assert.Equal("整形済み: えーとこれはテストです", pipeline.LastBackgroundFormattedText);
         Assert.True(result.BackgroundFormattingStarted);
     }
 

@@ -21,6 +21,7 @@ public sealed class DictationController
 
     private State _state = State.Idle;
     private CancellationTokenSource? _stopRecordingCts;
+    private Guid _latestOperationId;
 
     public event Action<PipelineResult>? Completed;
 
@@ -44,16 +45,24 @@ public sealed class DictationController
 
     private void OnBackgroundFormattingCompleted(BackgroundFormattingResult result)
     {
+        var shouldPublish = true;
         lock (_gate)
         {
-            if (result.FormattedText is { } formatted)
+            if (result.OperationId != _latestOperationId)
+            {
+                shouldPublish = false;
+            }
+            else if (result.FormattedText is { } formatted)
             {
                 LastFormattedResult = formatted;
                 LastResult = formatted;
             }
         }
 
-        BackgroundFormattingCompleted?.Invoke(result);
+        if (shouldPublish)
+        {
+            BackgroundFormattingCompleted?.Invoke(result);
+        }
     }
 
     /// <summary>ホットキー押下。Idleなら録音開始、Recordingなら停止して後段処理へ。</summary>
@@ -67,7 +76,9 @@ public sealed class DictationController
                     _state = State.Recording;
                     ActiveMode = mode;
                     _stopRecordingCts = new CancellationTokenSource();
-                    _ = RunPipelineAsync(mode, _stopRecordingCts.Token);
+                    _latestOperationId = Guid.NewGuid();
+                    LastFormattedResult = null;
+                    _ = RunPipelineAsync(mode, _stopRecordingCts.Token, _latestOperationId);
                     break;
 
                 case State.Recording:
@@ -82,32 +93,44 @@ public sealed class DictationController
         }
     }
 
-    private async Task RunPipelineAsync(FormattingMode mode, CancellationToken stopRecording)
+    private async Task RunPipelineAsync(FormattingMode mode, CancellationToken stopRecording, Guid operationId)
     {
         PipelineResult result;
         try
         {
             result = await _pipeline
-                .RunAsync(mode, stopRecording, CancellationToken.None)
+                .RunAsync(mode, stopRecording, CancellationToken.None, operationId)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            result = new PipelineResult(false, null, false, false, false, ex.Message);
+            result = new PipelineResult(false, null, false, false, false, ex.Message, operationId);
         }
 
+        var shouldPublish = true;
         lock (_gate)
         {
-            _state = State.Idle;
-            ActiveMode = null;
-            _stopRecordingCts?.Dispose();
-            _stopRecordingCts = null;
-            if (result is { Success: true, Text: not null })
+            if (result.OperationId != _latestOperationId)
             {
-                LastResult = result.Text;
+                shouldPublish = false;
+            }
+            else
+            {
+                _state = State.Idle;
+                ActiveMode = null;
+                _stopRecordingCts?.Dispose();
+                _stopRecordingCts = null;
+                LastFormattedResult = null;
+                if (result is { Success: true, Text: not null })
+                {
+                    LastResult = result.Text;
+                }
             }
         }
 
-        Completed?.Invoke(result);
+        if (shouldPublish)
+        {
+            Completed?.Invoke(result);
+        }
     }
 }
