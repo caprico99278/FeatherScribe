@@ -19,6 +19,9 @@ models/
 *.wav
 debug_artifacts/
 logs/
+reports/*
+!reports/.gitkeep
+config/appsettings.local.json
 
 # Sample generated artifacts: 原則コミットしない (実データ混入防止)。
 # 検証済みサンプルのみ明示的に許可する。

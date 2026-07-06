@@ -1,0 +1,1 @@
+PhoenixQuantのPhaseでCodexに実装指示を出します。whisper.cppとGemma 4の設定を見直します。

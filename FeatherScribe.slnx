@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/FeatherScribe.App/FeatherScribe.App.csproj" />
+    <Project Path="src/FeatherScribe.Benchmarks/FeatherScribe.Benchmarks.csproj" />
     <Project Path="src/FeatherScribe.Core/FeatherScribe.Core.csproj" />
     <Project Path="src/FeatherScribe.Infrastructure/FeatherScribe.Infrastructure.csproj" />
     <Project Path="src/FeatherScribe.Tests/FeatherScribe.Tests.csproj" />

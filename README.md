@@ -171,6 +171,31 @@ dotnet test FeatherScribe.slnx --filter "Category!=Integration"   # ユニット
 dotnet test FeatherScribe.slnx --filter "Category=Integration"    # whisper/Ollama疎通 (ローカルスタック必須)
 ```
 
+## Local LLM model benchmark
+
+FeatherScribe includes a benchmark tool for comparing local formatting models.
+The default runtime path remains whisper.cpp + raw paste.
+Local LLM formatting is optional and must be selected only after benchmark report review and human review of output samples.
+
+Recommended workflow:
+
+1. Pull candidate models with Ollama.
+2. Run the benchmark tool.
+3. Review generated reports and output samples.
+4. Choose a fast model and optional quality model.
+5. Update appsettings.json only after user approval.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/benchmark_format_models.ps1
+```
+
+```bash
+tools/benchmark_format_models.sh
+```
+
+Reports are written to `reports/` and are excluded from Git by default.
+Do not adopt a model directly from automatic scores; final adoption requires human confirmation that the generated samples preserve meaning, cleanup self-corrections, and keep proper nouns intact.
+
 - 実装指示書: [docs/work/phase1_implementation_instructions_001.md](docs/work/phase1_implementation_instructions_001.md) / [002](docs/work/phase1_implementation_instructions_002.md)
 - アーキテクチャ: [docs/architecture.md](docs/architecture.md)
 - 調査結果: [docs/research/local_stack_research.md](docs/research/local_stack_research.md)

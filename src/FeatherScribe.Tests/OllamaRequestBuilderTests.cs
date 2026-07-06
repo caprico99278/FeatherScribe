@@ -49,6 +49,25 @@ public class OllamaRequestBuilderTests
     }
 
     [Fact]
+    public void BuildChatRequestJson_OptionalRuntimeSettings_AreIncluded()
+    {
+        var json = OllamaRequestBuilder.BuildChatRequestJson(
+            "m",
+            "p",
+            0.1,
+            numPredict: 128,
+            numContext: 1024,
+            keepAlive: "30m");
+
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var options = root.GetProperty("options");
+        Assert.Equal("30m", root.GetProperty("keep_alive").GetString());
+        Assert.Equal(128, options.GetProperty("num_predict").GetInt32());
+        Assert.Equal(1024, options.GetProperty("num_ctx").GetInt32());
+    }
+
+    [Fact]
     public void BuildChatRequestJson_EmptyModel_Throws()
     {
         Assert.Throws<ArgumentException>(

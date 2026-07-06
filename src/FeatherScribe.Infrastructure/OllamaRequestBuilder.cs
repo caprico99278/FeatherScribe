@@ -20,7 +20,10 @@ public static class OllamaRequestBuilder
         string model,
         string prompt,
         double temperature,
-        int? gpuLayers = null)
+        int? gpuLayers = null,
+        int? numPredict = null,
+        int? numContext = null,
+        string? keepAlive = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -29,7 +32,8 @@ public static class OllamaRequestBuilder
             model,
             [new ChatMessage("user", prompt)],
             Stream: false,
-            new ChatOptions(temperature, gpuLayers));
+            KeepAlive: keepAlive,
+            new ChatOptions(temperature, gpuLayers, numPredict, numContext));
 
         return JsonSerializer.Serialize(request, SerializerOptions);
     }
@@ -59,6 +63,9 @@ public static class OllamaRequestBuilder
         string Model,
         IReadOnlyList<ChatMessage> Messages,
         bool Stream,
+        [property: JsonPropertyName("keep_alive")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? KeepAlive,
         ChatOptions Options);
 
     private sealed record ChatMessage(string Role, string Content);
@@ -67,5 +74,11 @@ public static class OllamaRequestBuilder
         double Temperature,
         [property: JsonPropertyName("num_gpu")]
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        int? NumGpu);
+        int? NumGpu,
+        [property: JsonPropertyName("num_predict")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int? NumPredict,
+        [property: JsonPropertyName("num_ctx")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        int? NumContext);
 }

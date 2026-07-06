@@ -36,6 +36,12 @@ public sealed class LlmSettings
 
     public double Temperature { get; init; } = 0.1;
 
+    public int? NumPredict { get; init; }
+
+    public int? NumContext { get; init; }
+
+    public string? KeepAlive { get; init; }
+
     /// <summary>通常モードのタイムアウト。超過時は即raw transcriptへフォールバックする。</summary>
     public int TimeoutSeconds { get; init; } = 8;
 

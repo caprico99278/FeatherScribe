@@ -43,7 +43,13 @@ public sealed class OllamaGemmaFormatter : ITextFormatter
             var template = _promptProvider.GetTemplate(request.Mode);
             var prompt = PromptBuilder.Build(template, request.DictionaryEntries, request.RawText);
             var requestJson = OllamaRequestBuilder.BuildChatRequestJson(
-                model, prompt, _settings.Temperature, _settings.GpuLayers);
+                model,
+                prompt,
+                _settings.Temperature,
+                _settings.GpuLayers,
+                _settings.NumPredict,
+                _settings.NumContext,
+                _settings.KeepAlive);
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
@@ -61,7 +67,8 @@ public sealed class OllamaGemmaFormatter : ITextFormatter
             var responseJson = await response.Content
                 .ReadAsStringAsync(timeoutCts.Token)
                 .ConfigureAwait(false);
-            var formatted = OllamaRequestBuilder.ParseChatResponse(responseJson);
+            var parsed = OllamaRequestBuilder.ParseChatResponse(responseJson);
+            var formatted = FormatPostProcessor.RemoveThinkTags(parsed).Text;
 
             var validation = FormatResultValidator.Validate(request.RawText, formatted);
             if (!validation.IsValid)
