@@ -56,6 +56,20 @@ public partial class App : Application
         _mainWindow.ShowHotkeyReport(hotkeyReport);
         _mainWindow.Show();
 
+        if (settingsProvider.LastWarnings.Count > 0)
+        {
+            foreach (var warning in settingsProvider.LastWarnings)
+            {
+                _eventLog.Write(new PipelineEvent(
+                    DateTimeOffset.Now, "settings_warning", false,
+                    warning, 0, "Startup", null, 0));
+            }
+
+            _trayIconService.Notify(
+                "設定読み込み警告",
+                string.Join("\n", settingsProvider.LastWarnings));
+        }
+
         if (settingsProvider.LastError is not null)
         {
             _trayIconService.Notify(

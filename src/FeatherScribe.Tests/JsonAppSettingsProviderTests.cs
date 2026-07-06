@@ -28,6 +28,9 @@ public class JsonAppSettingsProviderTests : IDisposable
     private void WriteSettings(string json)
         => File.WriteAllText(Path.Combine(_rootPath, "config", "appsettings.json"), json, Encoding.UTF8);
 
+    private void WriteLocalSettings(string json)
+        => File.WriteAllText(Path.Combine(_rootPath, "config", "appsettings.local.json"), json, Encoding.UTF8);
+
     [Fact]
     public void Load_ValidSettings_ParsesValues()
     {
@@ -40,7 +43,8 @@ public class JsonAppSettingsProviderTests : IDisposable
         }
         """);
 
-        var settings = new JsonAppSettingsProvider(_rootPath).Load();
+        var provider = new JsonAppSettingsProvider(_rootPath);
+        var settings = provider.Load();
 
         Assert.Equal("C:/tools/whisper-cli.exe", settings.Asr.WhisperExecutablePath);
         Assert.Equal(8, settings.Asr.Threads);
@@ -48,6 +52,109 @@ public class JsonAppSettingsProviderTests : IDisposable
         Assert.Equal(0.2, settings.Llm.Temperature);
         Assert.Equal(OutputMode.ClipboardOnly, settings.Output.ParsedMode);
         Assert.Equal(200, settings.Output.PasteDelayMilliseconds);
+        Assert.Equal([Path.Combine(_rootPath, "config", "appsettings.json")], provider.LoadedSettingsPaths);
+    }
+
+    [Fact]
+    public void Load_LocalSettings_OverridesOnlySpecifiedProperties()
+    {
+        WriteSettings("""
+        {
+          "llm": {
+            "enabled": false,
+            "provider": "ollama",
+            "endpoint": "http://localhost:11434",
+            "model": "gemma4:e2b",
+            "qualityModel": "gemma4:e4b",
+            "temperature": 0.1,
+            "timeoutSeconds": 8,
+            "qualityTimeoutSeconds": 300,
+            "fallbackToRaw": true,
+            "rawFirstPaste": true
+          }
+        }
+        """);
+        WriteLocalSettings("""
+        {
+          "llm": {
+            "enabled": true,
+            "model": "hf.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF:Q5_K_M",
+            "timeoutSeconds": 10
+          }
+        }
+        """);
+
+        var provider = new JsonAppSettingsProvider(_rootPath);
+        var settings = provider.Load();
+
+        Assert.True(settings.Llm.Enabled);
+        Assert.Equal("hf.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF:Q5_K_M", settings.Llm.Model);
+        Assert.Equal(10, settings.Llm.TimeoutSeconds);
+        Assert.Equal("ollama", settings.Llm.Provider);
+        Assert.Equal("http://localhost:11434", settings.Llm.Endpoint);
+        Assert.Equal("gemma4:e4b", settings.Llm.QualityModel);
+        Assert.True(settings.Llm.FallbackToRaw);
+        Assert.True(settings.Llm.RawFirstPaste);
+        Assert.Equal(
+            [
+                Path.Combine(_rootPath, "config", "appsettings.json"),
+                Path.Combine(_rootPath, "config", "appsettings.local.json"),
+            ],
+            provider.LoadedSettingsPaths);
+    }
+
+    [Fact]
+    public void Load_LocalLlmEnabledOnly_KeepsOtherLlmValues()
+    {
+        WriteSettings("""
+        {
+          "llm": {
+            "enabled": false,
+            "endpoint": "http://localhost:11434",
+            "model": "gemma4:e2b",
+            "qualityModel": "gemma4:e4b",
+            "timeoutSeconds": 8,
+            "fallbackToRaw": true,
+            "rawFirstPaste": true
+          }
+        }
+        """);
+        WriteLocalSettings("""{ "llm": { "enabled": true } }""");
+
+        var settings = new JsonAppSettingsProvider(_rootPath).Load();
+
+        Assert.True(settings.Llm.Enabled);
+        Assert.Equal("http://localhost:11434", settings.Llm.Endpoint);
+        Assert.Equal("gemma4:e2b", settings.Llm.Model);
+        Assert.Equal("gemma4:e4b", settings.Llm.QualityModel);
+        Assert.Equal(8, settings.Llm.TimeoutSeconds);
+        Assert.True(settings.Llm.FallbackToRaw);
+        Assert.True(settings.Llm.RawFirstPaste);
+    }
+
+    [Fact]
+    public void Load_BrokenLocalJson_UsesBaseSettingsWithWarning()
+    {
+        WriteSettings("""
+        {
+          "llm": {
+            "enabled": false,
+            "model": "gemma4:e2b",
+            "timeoutSeconds": 8
+          }
+        }
+        """);
+        WriteLocalSettings("{ this is not json ");
+
+        var provider = new JsonAppSettingsProvider(_rootPath);
+        var settings = provider.Load();
+
+        Assert.False(settings.Llm.Enabled);
+        Assert.Equal("gemma4:e2b", settings.Llm.Model);
+        Assert.Equal(8, settings.Llm.TimeoutSeconds);
+        Assert.Null(provider.LastError);
+        Assert.Contains(provider.LastWarnings, warning => warning.Contains("appsettings.local.json", StringComparison.Ordinal));
+        Assert.Equal([Path.Combine(_rootPath, "config", "appsettings.json")], provider.LoadedSettingsPaths);
     }
 
     [Fact]

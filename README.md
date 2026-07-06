@@ -67,6 +67,22 @@ dotnet run --project tools/MakeSampleAudio -- samples/audio/sample_001.wav
 ## appsettings.json の設定方法
 
 `config/appsettings.json` で主要な差し替えが可能。
+標準設定は `config/appsettings.json` に置き、個人検証用の上書き設定は `config/appsettings.local.json` に置く。
+`appsettings.local.json` は Git 管理外で、存在する場合だけ起動時に追加読み込みされる。
+local 側は部分設定を許可しており、書いたプロパティだけが base の `appsettings.json` を上書きする。
+TinySwallow などの実験用 LLM モデル設定は `appsettings.json` ではなく `appsettings.local.json` に書く。
+
+例:
+
+```json
+{
+  "llm": {
+    "enabled": true,
+    "model": "hf.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF:Q5_K_M",
+    "timeoutSeconds": 10
+  }
+}
+```
 
 | キー | 説明 |
 | --- | --- |
@@ -138,7 +154,7 @@ dotnet run --project src/FeatherScribe.App
 | 症状 | 対処 |
 | --- | --- |
 | 「whisper-cli が見つかりません」 | `tools/setup_whisper.ps1` を実行し、`asr.whisperExecutablePath` を確認 |
-| 「LLM へ接続できません」 | `ollama serve` が起動しているか、`llm.endpoint` を確認。Gemma 4停止中でも raw transcript で貼り付けは動作する |
+| 「LLM へ接続できません」 / `localhost:11434` に拒否された | 別PowerShellで `powershell -ExecutionPolicy Bypass -File tools/start_ollama_server.ps1` を実行し、開いたままにしてからアプリを起動する。`llm.endpoint` も確認。Ollama停止中でも raw transcript で貼り付けは動作する |
 | Ollamaが HTTP 500 (out-of-memory) | VRAM不足。`llm.gpuLayers` を `0` にしてCPU実行にする |
 | 整形が遅い / タイムアウトする | CPU実行の実測: e2bで約50秒、e4bで約2分強/発話。タイムアウト時は即raw transcriptが使われ「整形失敗・未整形で貼り付け」と通知される。`rawFirstPaste: true` (既定) ならrawが先に貼り付くため待ちは発生しない |
 | 貼り付けされない (コピーはされる) | 対象アプリが Ctrl+V を受け付けるか確認。手動 Ctrl+V で回収可能。管理者権限アプリへは通常権限から送信できない |
