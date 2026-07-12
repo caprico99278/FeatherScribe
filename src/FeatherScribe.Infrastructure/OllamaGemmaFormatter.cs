@@ -13,15 +13,18 @@ public sealed class OllamaGemmaFormatter : ITextFormatter
     private readonly HttpClient _httpClient;
     private readonly LlmSettings _settings;
     private readonly IPromptProvider _promptProvider;
+    private readonly IEventLog? _eventLog;
 
     public OllamaGemmaFormatter(
         HttpClient httpClient,
         LlmSettings settings,
-        IPromptProvider promptProvider)
+        IPromptProvider promptProvider,
+        IEventLog? eventLog = null)
     {
         _httpClient = httpClient;
         _settings = settings;
         _promptProvider = promptProvider;
+        _eventLog = eventLog;
     }
 
     public async Task<FormatResult> FormatAsync(
@@ -40,6 +43,19 @@ public sealed class OllamaGemmaFormatter : ITextFormatter
 
         try
         {
+            var promptFileName = _promptProvider is FilePromptProvider filePromptProvider
+                ? filePromptProvider.GetPromptFileName(request.Mode)
+                : "(unknown)";
+            _eventLog?.Write(new PipelineEvent(
+                DateTimeOffset.Now,
+                "format_profile_prompt",
+                true,
+                $"profile={request.Mode};prompt={promptFileName}",
+                0,
+                request.Mode.ToString(),
+                model,
+                request.RawText.Length));
+
             var template = _promptProvider.GetTemplate(request.Mode);
             var prompt = PromptBuilder.Build(template, request.DictionaryEntries, request.RawText);
             var requestJson = OllamaRequestBuilder.BuildChatRequestJson(
@@ -73,7 +89,17 @@ public sealed class OllamaGemmaFormatter : ITextFormatter
             var validation = FormatResultValidator.Validate(request.RawText, formatted);
             if (!validation.IsValid)
             {
-                return Fallback(request, $"整形結果を破棄しました: {validation.Reason}");
+                if (request.Mode is FormattingMode.PlainFast or FormattingMode.PlainQuality)
+                {
+                    var conservative = ConservativePlainFormatter.Format(request.RawText);
+                    var conservativeValidation = FormatResultValidator.Validate(request.RawText, conservative);
+                    if (conservativeValidation.IsValid)
+                    {
+                        return new FormatResult(conservative, UsedFallback: false, ErrorMessage: null, RejectedText: formatted?.Trim());
+                    }
+                }
+
+                return Fallback(request, $"整形結果を破棄しました: {validation.Reason}", formatted?.Trim());
             }
 
             return new FormatResult(formatted!.Trim(), UsedFallback: false, ErrorMessage: null);
@@ -92,6 +118,6 @@ public sealed class OllamaGemmaFormatter : ITextFormatter
         }
     }
 
-    private static FormatResult Fallback(FormatRequest request, string reason)
-        => new(request.RawText, UsedFallback: true, ErrorMessage: reason);
+    private static FormatResult Fallback(FormatRequest request, string reason, string? rejectedText = null)
+        => new(request.RawText, UsedFallback: true, ErrorMessage: reason, RejectedText: rejectedText);
 }

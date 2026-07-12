@@ -34,7 +34,7 @@ public partial class App : Application
         _pipeline = new DictationPipeline(
             new NAudioRecorder(settings.Recording),
             new WhisperCppTranscriptionEngine(settings.Asr),
-            new OllamaGemmaFormatter(_httpClient, settings.Llm, new FilePromptProvider(rootPath)),
+            new OllamaGemmaFormatter(_httpClient, settings.Llm, new FilePromptProvider(rootPath), _eventLog),
             new DictionaryCorrector(dictionaryProvider.Load()),
             textOutput,
             dictionaryProvider,
@@ -139,7 +139,7 @@ public partial class App : Application
             {
                 _trayIconService!.Notify(
                     "貼り付け失敗",
-                    "結果はアプリ内に保持しています。メイン画面から再コピーしてください。");
+                    "結果はアプリ内に保持しています。メイン画面からクリップボードにコピーできます。");
             }
         });
 
@@ -150,19 +150,44 @@ public partial class App : Application
 
             if (result.FormattedText is not null)
             {
-                // 自動置換はしない。ユーザー操作 (再コピー/再貼り付け) でのみ利用可能。
+                // 自動置換はしない。ユーザー操作 (コピー/貼り付け) でのみ利用可能。
                 _trayIconService!.Notify(
                     "整形完了",
-                    "整形結果を「再コピー」「再コピー+貼り付け」で利用できます(自動置換はしません)。");
+                    "整形結果を「クリップボードにコピー」または「直前の入力先へ貼り付け」で利用できます(自動置換はしません)。");
             }
             else
             {
+                var discarded = result.ErrorMessage?.StartsWith("整形結果を破棄しました:", StringComparison.Ordinal) == true;
                 _trayIconService!.Notify(
-                    "バックグラウンド整形に失敗しました",
-                    $"{result.ErrorMessage}\nraw transcriptは貼り付け済みです。");
+                    discarded ? "整形結果は採用しませんでした" : "バックグラウンド整形に失敗しました",
+                    $"{FormatBackgroundFormattingFailure(result.ErrorMessage)}\nraw transcriptは貼り付け済みです。候補は画面で確認して手動採用できます。");
             }
         });
     }
+
+    private static string FormatBackgroundFormattingFailure(string? errorMessage)
+    {
+        const string discardedPrefix = "整形結果を破棄しました:";
+        if (errorMessage?.StartsWith(discardedPrefix, StringComparison.Ordinal) == true)
+        {
+            var reason = errorMessage[discardedPrefix.Length..].Trim();
+            return $"理由: {ToDisplayReason(reason)}";
+        }
+
+        return errorMessage ?? "整形に失敗しました";
+    }
+
+    private static string ToDisplayReason(string reason)
+        => reason switch
+        {
+            "markdown_structure" => "見出し・箇条書きなどの形式が混入",
+            "heading_or_label" => "見出し・ラベルが混入",
+            "request_phrase_removed" => "文末表現が変化",
+            "time_range_changed" => "時刻範囲表現が変化",
+            "added_forbidden_verb" => "原文にない動詞が追加",
+            "uncertain_time_guessed" => "不確実な時刻を断定補正",
+            _ => reason,
+        };
 
     protected override void OnExit(ExitEventArgs e)
     {

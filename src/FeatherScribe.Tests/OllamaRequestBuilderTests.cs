@@ -17,9 +17,11 @@ public class OllamaRequestBuilderTests
         Assert.False(root.GetProperty("stream").GetBoolean());
         Assert.Equal(0.1, root.GetProperty("options").GetProperty("temperature").GetDouble());
 
-        var message = root.GetProperty("messages")[0];
-        Assert.Equal("user", message.GetProperty("role").GetString());
-        Assert.Equal("整形して", message.GetProperty("content").GetString());
+        var messages = root.GetProperty("messages");
+        Assert.Equal("system", messages[0].GetProperty("role").GetString());
+        Assert.Contains("Return only the final text", messages[0].GetProperty("content").GetString());
+        Assert.Equal("user", messages[1].GetProperty("role").GetString());
+        Assert.Equal("整形して", messages[1].GetProperty("content").GetString());
     }
 
     [Fact]

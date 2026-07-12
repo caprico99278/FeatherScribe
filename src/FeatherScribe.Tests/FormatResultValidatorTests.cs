@@ -62,4 +62,90 @@ public class FormatResultValidatorTests
 
         Assert.True(result.IsValid);
     }
+
+    [Theory]
+    [InlineData("## 会議予定\n\n今日の会議は、まず午前10時からでお願いします。")]
+    [InlineData("* 午前10時より、本日の会議を開始する。")]
+    [InlineData("- 午前10時より、本日の会議を開始する。")]
+    [InlineData("今日の会議です。\n* 午前10時より開始")]
+    public void Validate_MarkdownStructure_IsInvalid(string formatted)
+    {
+        var result = FormatResultValidator.Validate(
+            "今日の会議は、まず、午前10時からでお願いします。",
+            formatted);
+
+        Assert.False(result.IsValid);
+        Assert.Equal("markdown_structure", result.Reason);
+    }
+
+    [Fact]
+    public void Validate_RemovesRequestPhrase_IsInvalid()
+    {
+        var result = FormatResultValidator.Validate(
+            "今日の会議は、まず、午前10時からでお願いします。",
+            "今日の会議は、まず午前10時からです。");
+
+        Assert.False(result.IsValid);
+        Assert.Equal("request_phrase_removed", result.Reason);
+    }
+
+    [Fact]
+    public void Validate_ChangesTimeRangeToStart_IsInvalid()
+    {
+        var result = FormatResultValidator.Validate(
+            "今日の会議は、まず、午前10時からでお願いします。",
+            "今日の会議は、まず午前10時に開始でお願いします。");
+
+        Assert.False(result.IsValid);
+        Assert.Equal("time_range_changed", result.Reason);
+    }
+
+    [Theory]
+    [InlineData("今日の会議は、午前10時に開始します。")]
+    [InlineData("今日の会議は、まず午前10時に始めます。")]
+    [InlineData("今日の会議は、午前10時を予定しています。")]
+    public void Validate_AddsForbiddenVerb_IsInvalid(string formatted)
+    {
+        var result = FormatResultValidator.Validate(
+            "今日の会議は午前10時です。",
+            formatted);
+
+        Assert.False(result.IsValid);
+        Assert.Equal("added_forbidden_verb", result.Reason);
+    }
+
+    [Fact]
+    public void Validate_GuessesUncertainTime_IsInvalid()
+    {
+        var result = FormatResultValidator.Validate(
+            "今日はの会議、まずは周時からお願いします。",
+            "今日の会議、まずは午前10時からお願いします。");
+
+        Assert.False(result.IsValid);
+        Assert.Equal("uncertain_time_guessed", result.Reason);
+    }
+
+    [Theory]
+    [InlineData("修正後: 今日の会議は、まず午前10時からでお願いします。")]
+    [InlineData("文字起こし結果: 今日の会議は、まず午前10時からでお願いします。")]
+    [InlineData("会議予定\n今日の会議は、まず午前10時からでお願いします。")]
+    public void Validate_ForbiddenLabel_IsInvalid(string formatted)
+    {
+        var result = FormatResultValidator.Validate(
+            "今日の会議は、まず、午前10時からでお願いします。",
+            formatted);
+
+        Assert.False(result.IsValid);
+        Assert.Equal("heading_or_label", result.Reason);
+    }
+
+    [Fact]
+    public void Validate_MinimalRequestTimeEdit_IsValid()
+    {
+        var result = FormatResultValidator.Validate(
+            "今日の会議は、まず、午前10時からでお願いします。",
+            "今日の会議は、まず午前10時からでお願いします。");
+
+        Assert.True(result.IsValid);
+    }
 }

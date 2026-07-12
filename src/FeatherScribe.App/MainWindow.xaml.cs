@@ -5,13 +5,14 @@ using FeatherScribe.Core;
 namespace FeatherScribe.App;
 
 /// <summary>
-/// 状態表示と直近結果の再コピー/再貼り付けを行う最小限のメイン画面。
-/// 閉じるボタンはトレイへの格納として扱う。
+/// 状態表示と直近結果のコピー/貼り付けを行う最小限のメイン画面。
+/// 閉じるボタンはアプリ終了として扱う。
 /// </summary>
 public partial class MainWindow : Window
 {
     private readonly DictationController _controller;
     private readonly ITextOutput _output;
+    private readonly ForegroundWindowTracker _foregroundWindowTracker = new();
 
     public MainWindow(DictationController controller, AppSettings settings, ITextOutput output)
     {
@@ -48,6 +49,9 @@ public partial class MainWindow : Window
         if (result is { Success: true, Text: not null })
         {
             LastResultText.Text = result.Text;
+            RejectedResultText.Text = "";
+            ReformatButton.IsEnabled = true;
+            AdoptRejectedButton.IsEnabled = false;
             RecopyButton.IsEnabled = true;
             RepasteButton.IsEnabled = true;
             if (result.BackgroundFormattingStarted)
@@ -67,15 +71,48 @@ public partial class MainWindow : Window
         if (result.FormattedText is { } formatted)
         {
             LastResultText.Text = formatted;
+            RejectedResultText.Text = "";
+            ReformatButton.IsEnabled = true;
+            AdoptRejectedButton.IsEnabled = false;
             RecopyButton.IsEnabled = true;
             RepasteButton.IsEnabled = true;
-            StatusText.Text = "整形完了・再コピー/再貼り付けで整形結果を利用できます";
+            StatusText.Text = "整形完了・コピーまたは直前の入力先への貼り付けができます";
         }
         else
         {
-            StatusText.Text = $"バックグラウンド整形失敗 (raw貼り付け済み): {result.ErrorMessage}";
+            if (result.RejectedText is { } rejected)
+            {
+                RejectedResultText.Text = rejected;
+                AdoptRejectedButton.IsEnabled = true;
+            }
+
+            StatusText.Text = FormatBackgroundFormattingFailure(result.ErrorMessage);
         }
     }
+
+    private static string FormatBackgroundFormattingFailure(string? errorMessage)
+    {
+        const string discardedPrefix = "整形結果を破棄しました:";
+        if (errorMessage?.StartsWith(discardedPrefix, StringComparison.Ordinal) == true)
+        {
+            var reason = errorMessage[discardedPrefix.Length..].Trim();
+            return $"整形結果は採用しませんでした ({ToDisplayReason(reason)})。候補を確認して手動採用できます";
+        }
+
+        return $"バックグラウンド整形失敗 (raw貼り付け済み): {errorMessage}";
+    }
+
+    private static string ToDisplayReason(string reason)
+        => reason switch
+        {
+            "markdown_structure" => "見出し・箇条書きなどの形式が混入",
+            "heading_or_label" => "見出し・ラベルが混入",
+            "request_phrase_removed" => "文末表現が変化",
+            "time_range_changed" => "時刻範囲表現が変化",
+            "added_forbidden_verb" => "原文にない動詞が追加",
+            "uncertain_time_guessed" => "不確実な時刻を断定補正",
+            _ => reason,
+        };
 
     /// <summary>ホットキー登録結果を画面に表示する (失敗キーは後からここで確認できる)。</summary>
     public void ShowHotkeyReport(HotkeyRegistrationReport report)
@@ -103,7 +140,46 @@ public partial class MainWindow : Window
     {
         if (_controller.LastResult is { } text)
         {
+            if (!_foregroundWindowTracker.TryRestoreLastExternalWindow())
+            {
+                await _output.OutputAsync(text, OutputMode.ClipboardOnly, CancellationToken.None);
+                StatusText.Text = "貼り付け先を特定できませんでした。直近結果はクリップボードへコピー済みです";
+                return;
+            }
+
             await _output.OutputAsync(text, OutputMode.ClipboardAndPaste, CancellationToken.None);
+        }
+    }
+
+    public void ReformatLast()
+    {
+        var mode = _controller.ReformatLast();
+        if (mode is not null)
+        {
+            StatusText.Text = mode == FormattingMode.PlainQuality
+                ? "直近のraw結果を高品質モードで再整形中…"
+                : "直近のraw結果をバックグラウンドで再整形中…";
+        }
+        else
+        {
+            StatusText.Text = "再整形できるraw結果がありません";
+        }
+    }
+
+    public void AdoptRejectedResult()
+    {
+        if (_controller.AdoptRejectedFormattedResult())
+        {
+            LastResultText.Text = _controller.LastResult ?? "";
+            RejectedResultText.Text = "";
+            AdoptRejectedButton.IsEnabled = false;
+            RecopyButton.IsEnabled = true;
+            RepasteButton.IsEnabled = true;
+            StatusText.Text = "不採用候補を手動採用しました。コピーまたは貼り付けできます";
+        }
+        else
+        {
+            StatusText.Text = "手動採用できる候補がありません";
         }
     }
 
@@ -131,7 +207,31 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>トレイの「終了」からのみ実際に閉じる。</summary>
+    private void ReformatButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            ReformatLast();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"再整形開始失敗: {ex.Message}";
+        }
+    }
+
+    private void AdoptRejectedButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            AdoptRejectedResult();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"手動採用失敗: {ex.Message}";
+        }
+    }
+
+    /// <summary>トレイの「終了」からメイン画面を閉じる。</summary>
     public void CloseForExit()
     {
         Close();
@@ -140,5 +240,10 @@ public partial class MainWindow : Window
     protected override void OnClosing(CancelEventArgs e)
     {
         base.OnClosing(e);
+        _foregroundWindowTracker.Dispose();
+        if (!Application.Current.Dispatcher.HasShutdownStarted)
+        {
+            Application.Current.Shutdown();
+        }
     }
 }

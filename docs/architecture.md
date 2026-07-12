@@ -25,7 +25,7 @@ Gemma 4整形 (OllamaGemmaFormatter → /api/chat)
 
 - `llm.enabled: false` (既定) の間はGemma整形をスキップし、辞書補正のみで即貼り付けする
 - PlainFast/PlainQualityでは `llm.rawFirstPaste: true` (既定) により **rawを先に貼り付け**、
-  整形はバックグラウンドで実行する。整形結果は再コピー/再貼り付け用に保持され、
+  整形はバックグラウンドで実行する。整形結果はコピー/貼り付け用に保持され、
   **入力欄の自動置換は行わない**
 - PlainQualityのみ `llm.qualityModel` (E4B) + `llm.qualityTimeoutSeconds` を使用し、
   他モードは軽量モデル + 短タイムアウト (超過時は即raw)
@@ -60,7 +60,7 @@ FeatherScribe.App            WPF常駐アプリ
   ├─ App                     コンポジションルート
   ├─ DictationController     Idle→Recording→Processing の状態機械
   ├─ HotkeyService           RegisterHotKey / WM_HOTKEY
-  ├─ TrayIconService         トレイ常駐・通知・再コピー/再貼り付け・終了
+  ├─ TrayIconService         トレイ常駐・通知・コピー/貼り付け・終了
   ├─ MainWindow              状態表示と直近結果
   └─ RecordingOverlay        録音中/処理中インジケータ
 ```
@@ -81,7 +81,7 @@ ASR / LLM / 出力はすべて Core のインターフェース越しに使用�
 | --- | --- |
 | whisper.cpp | 通知。クリップボードは変更しない。exit code / stderr をログ |
 | Gemma 4 | raw transcript で続行 (`UsedFallback=true`)。「整形失敗・未整形で貼り付け」通知 |
-| クリップボード | 直近結果をアプリ内に保持。メイン画面/トレイから再コピー |
+| クリップボード | 直近結果をアプリ内に保持。メイン画面/トレイからコピーまたは貼り付け |
 | Ctrl+V送信 | クリップボードには残る。手動Ctrl+Vで回収可能 |
 
 ## プライバシー (指示書§11)

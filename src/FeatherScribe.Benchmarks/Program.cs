@@ -170,7 +170,7 @@ internal static class Program
     {
         var builder = new StringBuilder();
         builder.AppendLine(
-            "model,sample_id,sample_name,elapsed_ms,timed_out,error,output_text,output_chars,contains_preamble,contains_think_tag,think_tag_removed,changed_terms,missing_required_terms,added_unspoken_content,meaning_changed_suspected,disqualified,score_quality,score_performance,score_reliability,score_total");
+            "model,sample_id,sample_name,elapsed_ms,timed_out,error,output_text,output_chars,contains_preamble,contains_think_tag,think_tag_removed,changed_terms,missing_required_terms,added_unspoken_content,meaning_changed_suspected,particle_correction_expected,particle_correction_succeeded,request_phrase_preserved,time_range_preserved,uncertain_time_correction_suspected,forbidden_heading_or_label,forbidden_meaning_addition,disqualified,score_quality,score_performance,score_reliability,score_total");
         foreach (var result in results)
         {
             builder.AppendLine(string.Join(",", new[]
@@ -190,6 +190,13 @@ internal static class Program
                 Csv(string.Join("; ", result.MissingRequiredTerms)),
                 result.AddedUnspokenContent.ToString(CultureInfo.InvariantCulture),
                 result.MeaningChangedSuspected.ToString(CultureInfo.InvariantCulture),
+                result.ParticleCorrectionExpected.ToString(CultureInfo.InvariantCulture),
+                result.ParticleCorrectionSucceeded.ToString(CultureInfo.InvariantCulture),
+                result.RequestPhrasePreserved.ToString(CultureInfo.InvariantCulture),
+                result.TimeRangePreserved.ToString(CultureInfo.InvariantCulture),
+                result.UncertainTimeCorrectionSuspected.ToString(CultureInfo.InvariantCulture),
+                result.ForbiddenHeadingOrLabel.ToString(CultureInfo.InvariantCulture),
+                result.ForbiddenMeaningAddition.ToString(CultureInfo.InvariantCulture),
                 result.Disqualified.ToString(CultureInfo.InvariantCulture),
                 result.ScoreQuality.ToString(CultureInfo.InvariantCulture),
                 result.ScorePerformance.ToString(CultureInfo.InvariantCulture),
@@ -210,8 +217,8 @@ internal static class Program
         builder.AppendLine($"Endpoint: `{options.Endpoint}`");
         builder.AppendLine($"Temperature: `{options.Temperature}` / num_predict: `{options.NumPredict}` / num_ctx: `{options.NumContext}` / keep_alive: `{options.KeepAlive}`");
         builder.AppendLine();
-        builder.AppendLine("| Model | Runs | Avg ms | Timeout % | Empty outputs | Disqualified | Avg score | Changed terms | Think tag seen | Preamble seen |");
-        builder.AppendLine("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+        builder.AppendLine("| Model | Runs | Avg ms | Timeout % | Empty outputs | Disqualified | Avg score | Particle fixes | Time range violations | Unsafe time corrections | Heading/label violations | Meaning additions | Changed terms | Think tag seen | Preamble seen |");
+        builder.AppendLine("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
         foreach (var group in results.GroupBy(r => r.Model).OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
         {
             var count = group.Count();
@@ -219,7 +226,7 @@ internal static class Program
             var timeoutRate = group.Count(r => r.TimedOut) * 100.0 / count;
             var avgScore = group.Average(r => r.ScoreTotal);
             builder.AppendLine(
-                $"| `{group.Key}` | {count} | {avgMs:F0} | {timeoutRate:F1}% | {group.Count(r => r.OutputChars == 0)} | {group.Count(r => r.Disqualified)} | {avgScore:F1} | {group.Count(r => r.ChangedTerms.Count > 0)} | {group.Count(r => r.ContainsThinkTag)} | {group.Count(r => r.ContainsPreamble)} |");
+                $"| `{group.Key}` | {count} | {avgMs:F0} | {timeoutRate:F1}% | {group.Count(r => r.OutputChars == 0)} | {group.Count(r => r.Disqualified)} | {avgScore:F1} | {group.Count(r => r.ParticleCorrectionExpected && r.ParticleCorrectionSucceeded)} | {group.Count(r => !r.TimeRangePreserved)} | {group.Count(r => r.UncertainTimeCorrectionSuspected)} | {group.Count(r => r.ForbiddenHeadingOrLabel)} | {group.Count(r => r.ForbiddenMeaningAddition)} | {group.Count(r => r.ChangedTerms.Count > 0)} | {group.Count(r => r.ContainsThinkTag)} | {group.Count(r => r.ContainsPreamble)} |");
         }
 
         builder.AppendLine();
@@ -240,6 +247,9 @@ internal static class Program
         builder.AppendLine("- TinySwallow sample_001 changes the request wording into a descriptive sentence.");
         builder.AppendLine("- TinySwallow sample_003 leaves `同期で` in the output.");
         builder.AppendLine("- TinySwallow sample_007 does not recover the ASR misrecognition.");
+        builder.AppendLine("- sample_009 checks whether models can fix the particle error `今日はの会議` to `今日の会議` without guessing `周時` as `10時`.");
+        builder.AppendLine("- sample_009_real_asr_time disqualifies heading/label output such as `## 修正後の文字起こし結果：`, removes points if `お願いします` disappears, and penalizes meaning additions such as `開始していただけます`.");
+        builder.AppendLine("- sample_010_real_voice_request_time checks that `お願いします` and `午前10時から` remain request/range expressions, without rewriting to `始めます`, `開始します`, or `予定しています`.");
         builder.AppendLine("- TinySwallow is promising as a fast candidate, but approval requires human review.");
         builder.AppendLine("- Keep gemma3:1b as a Fast candidate so reviewers can compare speed, meaning preservation, self-correction cleanup, and proper noun preservation against TinySwallow.");
         builder.AppendLine();
@@ -286,6 +296,13 @@ internal static class Program
                 builder.AppendLine($"- error: {block.Result.Error}");
                 builder.AppendLine($"- changed_terms: {string.Join(", ", block.Result.ChangedTerms)}");
                 builder.AppendLine($"- missing_required_terms: {string.Join(", ", block.Result.MissingRequiredTerms)}");
+                builder.AppendLine($"- particle_correction_expected: {block.Result.ParticleCorrectionExpected}");
+                builder.AppendLine($"- particle_correction_succeeded: {block.Result.ParticleCorrectionSucceeded}");
+                builder.AppendLine($"- request_phrase_preserved: {block.Result.RequestPhrasePreserved}");
+                builder.AppendLine($"- time_range_preserved: {block.Result.TimeRangePreserved}");
+                builder.AppendLine($"- uncertain_time_correction_suspected: {block.Result.UncertainTimeCorrectionSuspected}");
+                builder.AppendLine($"- forbidden_heading_or_label: {block.Result.ForbiddenHeadingOrLabel}");
+                builder.AppendLine($"- forbidden_meaning_addition: {block.Result.ForbiddenMeaningAddition}");
                 builder.AppendLine($"- disqualified: {block.Result.Disqualified}");
                 builder.AppendLine($"- contains_preamble: {block.Result.ContainsPreamble}");
                 builder.AppendLine($"- contains_think_tag: {block.Result.ContainsThinkTag}");
@@ -487,6 +504,13 @@ internal static class Program
         IReadOnlyList<string> MissingRequiredTerms,
         bool AddedUnspokenContent,
         bool MeaningChangedSuspected,
+        bool ParticleCorrectionExpected,
+        bool ParticleCorrectionSucceeded,
+        bool RequestPhrasePreserved,
+        bool TimeRangePreserved,
+        bool UncertainTimeCorrectionSuspected,
+        bool ForbiddenHeadingOrLabel,
+        bool ForbiddenMeaningAddition,
         bool Disqualified,
         int ScoreQuality,
         int ScorePerformance,
@@ -515,6 +539,13 @@ internal static class Program
                 RequiredTerms.Where(term => sample.Text.Contains(term, StringComparison.Ordinal)).ToList(),
                 false,
                 false,
+                IsParticleCorrectionExpected(sample),
+                false,
+                false,
+                true,
+                false,
+                false,
+                false,
                 true,
                 0,
                 0,
@@ -539,8 +570,25 @@ internal static class Program
             var containsPreamble = ContainsPreambleText(output);
             var addedUnspokenContent = output.Length > Math.Max(sample.Text.Length * 3, sample.Text.Length + 180);
             var tooManyMissingRequiredTerms = missingTerms.Count >= RequiredTermDisqualificationThreshold;
-            var meaningChangedSuspected = output.Length < sample.Text.Length / 4 || changedTerms.Count > 0;
-            var disqualified = isEmptyOutput || tooManyMissingRequiredTerms;
+            var particleCorrectionExpected = IsParticleCorrectionExpected(sample);
+            var particleCorrectionSucceeded = !particleCorrectionExpected ||
+                                              output.Contains("今日の会議", StringComparison.Ordinal);
+            var requestPhrasePreserved = IsRequestPhrasePreserved(sample, output);
+            var timeRangePreserved = IsTimeRangePreserved(sample, output);
+            var uncertainTimeCorrectionSuspected = HasUncertainTimeCorrection(sample, output);
+            var forbiddenHeadingOrLabel = ContainsForbiddenHeadingOrLabel(output);
+            var forbiddenMeaningAddition = ContainsForbiddenMeaningAddition(output);
+            var meaningChangedSuspected = output.Length < sample.Text.Length / 4 ||
+                                          changedTerms.Count > 0 ||
+                                          !requestPhrasePreserved ||
+                                          !timeRangePreserved ||
+                                          uncertainTimeCorrectionSuspected ||
+                                          forbiddenMeaningAddition;
+            var disqualified = isEmptyOutput ||
+                               tooManyMissingRequiredTerms ||
+                               forbiddenHeadingOrLabel ||
+                               forbiddenMeaningAddition ||
+                               (RequiresRequestPhrase(sample) && !requestPhrasePreserved);
 
             if (disqualified)
             {
@@ -562,6 +610,13 @@ internal static class Program
                     missingTerms,
                     addedUnspokenContent,
                     meaningChangedSuspected,
+                    particleCorrectionExpected,
+                    particleCorrectionSucceeded,
+                    requestPhrasePreserved,
+                    timeRangePreserved,
+                    uncertainTimeCorrectionSuspected,
+                    forbiddenHeadingOrLabel,
+                    forbiddenMeaningAddition,
                     true,
                     0,
                     0,
@@ -574,6 +629,11 @@ internal static class Program
             quality -= containsPreamble ? 8 : 0;
             quality -= addedUnspokenContent ? 8 : 0;
             quality -= meaningChangedSuspected ? 8 : 0;
+            quality -= particleCorrectionExpected && !particleCorrectionSucceeded ? 6 : 0;
+            quality -= !requestPhrasePreserved ? 15 : 0;
+            quality -= !timeRangePreserved ? 12 : 0;
+            quality -= uncertainTimeCorrectionSuspected ? 20 : 0;
+            quality -= forbiddenMeaningAddition ? 15 : 0;
             quality = Math.Clamp(quality, 0, 60);
             var performance = elapsedMilliseconds <= 15_000 ? 25 :
                 elapsedMilliseconds <= 60_000 ? 18 :
@@ -601,6 +661,13 @@ internal static class Program
                 missingTerms,
                 addedUnspokenContent,
                 meaningChangedSuspected,
+                particleCorrectionExpected,
+                particleCorrectionSucceeded,
+                requestPhrasePreserved,
+                timeRangePreserved,
+                uncertainTimeCorrectionSuspected,
+                forbiddenHeadingOrLabel,
+                forbiddenMeaningAddition,
                 false,
                 quality,
                 performance,
@@ -614,5 +681,78 @@ internal static class Program
                output.Contains("整形結果", StringComparison.Ordinal) ||
                output.Contains("Here", StringComparison.OrdinalIgnoreCase) ||
                output.Contains("Output", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsParticleCorrectionExpected(BenchmarkSample sample)
+            => IsRealAsrTimeSample(sample);
+
+        private static bool HasUncertainTimeCorrection(BenchmarkSample sample, string output)
+            => IsAmbiguousTimeSample(sample) &&
+               (output.Contains("10時", StringComparison.Ordinal) ||
+                output.Contains("十時", StringComparison.Ordinal) ||
+                output.Contains("午前10時", StringComparison.Ordinal) ||
+                output.Contains("午前十時", StringComparison.Ordinal));
+
+        private static bool IsRequestPhrasePreserved(BenchmarkSample sample, string output)
+        {
+            if (!RequiresRequestPhrase(sample))
+            {
+                return true;
+            }
+
+            if (!output.Contains("お願いします", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return !IsAmbiguousTimeSample(sample) ||
+                   output.Contains("まずは", StringComparison.Ordinal);
+        }
+
+        private static bool IsTimeRangePreserved(BenchmarkSample sample, string output)
+            => !IsRequestTimeRangeSample(sample) ||
+               (output.Contains("午前10時から", StringComparison.Ordinal) &&
+                !output.Contains("午前10時に", StringComparison.Ordinal) &&
+                !output.Contains("午前10時より", StringComparison.Ordinal) &&
+                !output.Contains("に開始", StringComparison.Ordinal) &&
+                !output.Contains("に始め", StringComparison.Ordinal));
+
+        private static bool RequiresRequestPhrase(BenchmarkSample sample)
+            => IsRealAsrTimeSample(sample);
+
+        private static bool ContainsForbiddenHeadingOrLabel(string output)
+            => output.Contains("##", StringComparison.Ordinal) ||
+               output.Contains("\n*", StringComparison.Ordinal) ||
+               output.StartsWith("* ", StringComparison.Ordinal) ||
+               output.Contains("\n- ", StringComparison.Ordinal) ||
+               output.StartsWith("- ", StringComparison.Ordinal) ||
+               output.Contains("会議予定", StringComparison.Ordinal) ||
+               output.Contains("修正後", StringComparison.Ordinal) ||
+               output.Contains("文字起こし結果", StringComparison.Ordinal);
+
+        private static bool ContainsForbiddenMeaningAddition(string output)
+            => output.Contains("開始していただけます", StringComparison.Ordinal) ||
+               output.Contains("開始してください", StringComparison.Ordinal) ||
+               output.Contains("開始", StringComparison.Ordinal) ||
+               output.Contains("始める", StringComparison.Ordinal) ||
+               output.Contains("始める", StringComparison.Ordinal) ||
+               output.Contains("始め", StringComparison.Ordinal) ||
+               output.Contains("予定", StringComparison.Ordinal) ||
+               output.Contains("始めます", StringComparison.Ordinal) ||
+               output.Contains("開始する", StringComparison.Ordinal) ||
+               output.Contains("開始します", StringComparison.Ordinal) ||
+               output.Contains("予定する", StringComparison.Ordinal) ||
+               output.Contains("予定しています", StringComparison.Ordinal);
+
+        private static bool IsRealAsrTimeSample(BenchmarkSample sample)
+            => IsAmbiguousTimeSample(sample) ||
+               IsRequestTimeRangeSample(sample);
+
+        private static bool IsRequestTimeRangeSample(BenchmarkSample sample)
+            => sample.Id.Equals("sample_010_real_voice_request_time", StringComparison.OrdinalIgnoreCase) ||
+               sample.Id.Equals("sample_011_real_voice_markdown_overrewrite", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsAmbiguousTimeSample(BenchmarkSample sample)
+            => sample.Id.Equals("sample_009_real_asr", StringComparison.OrdinalIgnoreCase) ||
+               sample.Id.Equals("sample_009_real_asr_time", StringComparison.OrdinalIgnoreCase);
     }
 }

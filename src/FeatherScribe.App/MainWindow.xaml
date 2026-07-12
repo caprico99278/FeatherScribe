@@ -1,12 +1,13 @@
 <Window x:Class="FeatherScribe.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="FeatherScribe" Height="360" Width="520"
+        Title="FeatherScribe" Height="500" Width="760"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -21,12 +22,24 @@
                      VerticalScrollBarVisibility="Auto" BorderThickness="0"/>
         </GroupBox>
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-            <Button x:Name="RecopyButton" Content="再コピー" Padding="12,4" Margin="0,0,8,0"
-                    Click="RecopyButton_Click" IsEnabled="False"/>
-            <Button x:Name="RepasteButton" Content="再コピー+貼り付け" Padding="12,4"
+        <GroupBox Grid.Row="3" Header="不採用の整形候補 (確認してから手動採用)">
+            <TextBox x:Name="RejectedResultText" IsReadOnly="True" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto" BorderThickness="0"/>
+        </GroupBox>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="ReformatButton" Content="もう一度整形" Padding="12,4" Margin="0,0,8,0"
+                    Click="ReformatButton_Click" IsEnabled="False"
+                    ToolTip="直近のraw結果を使って、バックグラウンド整形をもう一度実行します。"/>
+            <Button x:Name="AdoptRejectedButton" Content="候補を手動採用" Padding="12,4" Margin="0,0,8,0"
+                    Click="AdoptRejectedButton_Click" IsEnabled="False"
+                    ToolTip="不採用候補を確認したうえで、直近結果として採用します。"/>
+            <Button x:Name="RecopyButton" Content="クリップボードにコピー" Padding="12,4" Margin="0,0,8,0"
+                    Click="RecopyButton_Click" IsEnabled="False"
+                    ToolTip="直近の結果をクリップボードに入れます。貼り付けは行いません。"/>
+            <Button x:Name="RepasteButton" Content="直前の入力先へ貼り付け" Padding="12,4"
                     Click="RepasteButton_Click" IsEnabled="False"
-                    ToolTip="クリップボードへコピー後、フォーカスのある入力欄へ Ctrl+V を送信します"/>
+                    ToolTip="直近の結果をクリップボードに入れてから、FeatherScribeの前に使っていたウィンドウへ Ctrl+V を送信します。"/>
         </StackPanel>
     </Grid>
 </Window>

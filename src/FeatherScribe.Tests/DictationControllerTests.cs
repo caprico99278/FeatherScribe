@@ -217,6 +217,88 @@ public class DictationControllerTests
         backgroundFormatResult.SetResult(new FormatResult("formatted later", false, null));
     }
 
+    [Fact]
+    public async Task ReformatLast_FormatsLastRawResultAgain()
+    {
+        var settings = new AppSettings
+        {
+            Llm = new LlmSettings { Enabled = true, RawFirstPaste = true },
+        };
+        var pipeline = new DictationPipeline(
+            new FakeRecorder(),
+            new QueueSpeechToText("raw request"),
+            new DelayedFirstFormatter(
+                Task.FromResult(new FormatResult("raw request", true, "整形結果を破棄しました: request_phrase_removed")),
+                new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)),
+            new DictionaryCorrector([]),
+            new CapturingOutput(),
+            new EmptyDictionaryProvider(),
+            new NullEventLog(),
+            settings);
+        var controller = new DictationController(pipeline, settings);
+
+        var completed = ListenCompleted(controller);
+        var firstBackground = ListenControllerBackground(controller);
+        controller.Toggle(FormattingMode.PlainFast);
+
+        await completed.WaitAsync(EventTimeout);
+        var failedBackground = await firstBackground.WaitAsync(EventTimeout);
+
+        Assert.Null(failedBackground.FormattedText);
+        Assert.Equal("raw request", controller.LastRawResult);
+        Assert.Equal("raw request", controller.LastResult);
+
+        var secondBackground = ListenControllerBackground(controller);
+        Assert.Equal(FormattingMode.PlainQuality, controller.ReformatLast());
+
+        var reformatted = await secondBackground.WaitAsync(EventTimeout);
+        Assert.Equal(FormattingMode.PlainQuality, reformatted.Mode);
+        Assert.Equal("formatted: raw request", reformatted.FormattedText);
+        Assert.Equal("formatted: raw request", controller.LastFormattedResult);
+        Assert.Equal("formatted: raw request", controller.LastResult);
+        Assert.Equal("raw request", controller.LastRawResult);
+    }
+
+    [Fact]
+    public async Task RejectedBackgroundCandidate_CanBeAdoptedManually()
+    {
+        var settings = new AppSettings
+        {
+            Llm = new LlmSettings { Enabled = true, RawFirstPaste = true },
+        };
+        var pipeline = new DictationPipeline(
+            new FakeRecorder(),
+            new QueueSpeechToText("raw request"),
+            new DelayedFirstFormatter(
+                Task.FromResult(new FormatResult(
+                    "raw request",
+                    true,
+                    "整形結果を破棄しました: request_phrase_removed",
+                    "candidate text")),
+                new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)),
+            new DictionaryCorrector([]),
+            new CapturingOutput(),
+            new EmptyDictionaryProvider(),
+            new NullEventLog(),
+            settings);
+        var controller = new DictationController(pipeline, settings);
+
+        var completed = ListenCompleted(controller);
+        var background = ListenControllerBackground(controller);
+        controller.Toggle(FormattingMode.PlainFast);
+
+        await completed.WaitAsync(EventTimeout);
+        await background.WaitAsync(EventTimeout);
+
+        Assert.Equal("candidate text", controller.LastRejectedFormattedResult);
+        Assert.Equal("raw request", controller.LastResult);
+
+        Assert.True(controller.AdoptRejectedFormattedResult());
+        Assert.Equal("candidate text", controller.LastResult);
+        Assert.Equal("candidate text", controller.LastFormattedResult);
+        Assert.Null(controller.LastRejectedFormattedResult);
+    }
+
     private static Task<PipelineResult> ListenCompleted(DictationController controller)
     {
         var tcs = new TaskCompletionSource<PipelineResult>(

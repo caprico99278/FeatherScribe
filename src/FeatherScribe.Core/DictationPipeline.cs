@@ -29,7 +29,8 @@ public sealed record BackgroundFormattingResult(
     Guid OperationId,
     FormattingMode Mode,
     string? FormattedText,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    string? RejectedText = null);
 
 /// <summary>
 /// 録音 → 文字起こし → 辞書補正(前) → LLM整形 → 辞書補正(後) → 出力 の縦パイプライン。
@@ -141,7 +142,7 @@ public sealed class DictationPipeline : IDisposable
                 var (ok, outputError) = await TryOutputAsync(corrected, cancellationToken).ConfigureAwait(false);
                 LogEvent("output", ok, outputError, stopwatch.ElapsedMilliseconds, mode, corrected.Length);
 
-                StartBackgroundFormatting(runId, request);
+                QueueBackgroundFormatting(runId, request);
                 StageChanged?.Invoke(PipelineStage.Completed, "raw貼り付け完了・バックグラウンドで整形中");
                 return new PipelineResult(true, corrected, true, false, ok, outputError, runId);
             }
@@ -195,7 +196,7 @@ public sealed class DictationPipeline : IDisposable
     /// パイプライン本体・次の録音をブロックしない。失敗してもアプリを落とさず、
     /// アプリ終了時 (Dispose) には安全にキャンセルされる。
     /// </summary>
-    private void StartBackgroundFormatting(Guid operationId, FormatRequest request)
+    public void QueueBackgroundFormatting(Guid operationId, FormatRequest request)
     {
         var lifetimeToken = _lifetimeCts.Token;
         _ = Task.Run(async () =>
@@ -211,7 +212,7 @@ public sealed class DictationPipeline : IDisposable
                     LogEvent("format_background", false, result.ErrorMessage,
                         stopwatch.ElapsedMilliseconds, request.Mode, 0);
                     BackgroundFormattingCompleted?.Invoke(new BackgroundFormattingResult(
-                        operationId, request.Mode, null, result.ErrorMessage ?? "整形に失敗しました"));
+                        operationId, request.Mode, null, result.ErrorMessage ?? "整形に失敗しました", result.RejectedText));
                     return;
                 }
 
@@ -233,6 +234,12 @@ public sealed class DictationPipeline : IDisposable
                     operationId, request.Mode, null, ex.Message));
             }
         }, CancellationToken.None);
+    }
+
+    public void QueueBackgroundFormatting(Guid operationId, string rawText, FormattingMode mode)
+    {
+        var request = new FormatRequest(rawText, mode, _dictionaryProvider.Load());
+        QueueBackgroundFormatting(operationId, request);
     }
 
     /// <summary>出力失敗でもパイプラインを落とさない(指示書§12.3/§12.4)。</summary>

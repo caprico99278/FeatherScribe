@@ -39,6 +39,7 @@ public static class FormatResultValidator
             return ValidationResult.Fail("empty_output");
         }
 
+        var raw = rawTranscript ?? "";
         var trimmed = formatted.Trim();
 
         foreach (var prefix in ForbiddenPrefixes)
@@ -49,13 +50,75 @@ public static class FormatResultValidator
             }
         }
 
-        var maxLength = (int)(rawTranscript.Length * MaxLengthRatio) + MaxLengthSlack;
+        if (ContainsMarkdownStructure(trimmed))
+        {
+            return ValidationResult.Fail("markdown_structure");
+        }
+
+        if (ContainsForbiddenLabel(trimmed))
+        {
+            return ValidationResult.Fail("heading_or_label");
+        }
+
+        if (raw.Contains("お願いします", StringComparison.Ordinal) &&
+            !trimmed.Contains("お願いします", StringComparison.Ordinal))
+        {
+            return ValidationResult.Fail("request_phrase_removed");
+        }
+
+        if (raw.Contains("午前10時から", StringComparison.Ordinal) &&
+            !trimmed.Contains("午前10時から", StringComparison.Ordinal))
+        {
+            return ValidationResult.Fail("time_range_changed");
+        }
+
+        if (AddedForbiddenVerb(raw, trimmed))
+        {
+            return ValidationResult.Fail("added_forbidden_verb");
+        }
+
+        if (raw.Contains("周時", StringComparison.Ordinal) &&
+            (trimmed.Contains("10時", StringComparison.Ordinal) ||
+             trimmed.Contains("午前10時", StringComparison.Ordinal)))
+        {
+            return ValidationResult.Fail("uncertain_time_guessed");
+        }
+
+        var maxLength = (int)(raw.Length * MaxLengthRatio) + MaxLengthSlack;
         if (trimmed.Length > maxLength)
         {
             return ValidationResult.Fail("output_too_long");
         }
 
         return ValidationResult.Ok();
+    }
+
+    private static bool ContainsMarkdownStructure(string output)
+        => output.Contains("##", StringComparison.Ordinal) ||
+           output.StartsWith("* ", StringComparison.Ordinal) ||
+           output.StartsWith("- ", StringComparison.Ordinal) ||
+           output.Contains("\n* ", StringComparison.Ordinal) ||
+           output.Contains("\n- ", StringComparison.Ordinal);
+
+    private static bool ContainsForbiddenLabel(string output)
+        => output.Contains("修正後", StringComparison.Ordinal) ||
+           output.Contains("文字起こし結果", StringComparison.Ordinal) ||
+           output.Contains("会議予定", StringComparison.Ordinal);
+
+    private static bool AddedForbiddenVerb(string raw, string output)
+    {
+        string[] forbidden =
+        [
+            "開始",
+            "始めます",
+            "開始します",
+            "予定しています",
+            "予定する",
+        ];
+
+        return forbidden.Any(term =>
+            !raw.Contains(term, StringComparison.Ordinal) &&
+            output.Contains(term, StringComparison.Ordinal));
     }
 }
 

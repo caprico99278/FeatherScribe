@@ -64,4 +64,11 @@ public sealed class FilePromptProvider : IPromptProvider
             return FallbackTemplate;
         }
     }
+
+    public string GetPromptFileName(FormattingMode mode)
+        => mode == FormattingMode.NoFormat
+            ? "(none)"
+            : FileNames.TryGetValue(mode, out var fileName)
+                ? fileName
+                : "(fallback)";
 }

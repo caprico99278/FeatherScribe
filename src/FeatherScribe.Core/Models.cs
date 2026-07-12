@@ -23,7 +23,8 @@ public sealed record FormatRequest(
 public sealed record FormatResult(
     string Text,
     bool UsedFallback,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    string? RejectedText = null);
 
 public sealed record DictionaryEntry(
     IReadOnlyList<string> Patterns,

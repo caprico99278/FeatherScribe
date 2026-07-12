@@ -8,6 +8,9 @@ namespace FeatherScribe.Infrastructure;
 /// </summary>
 public static class OllamaRequestBuilder
 {
+    private const string SystemPrompt =
+        "Return only the final text. Do not add headings, lists, Markdown, labels, explanations, or content not present in the input.";
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -30,7 +33,10 @@ public static class OllamaRequestBuilder
 
         var request = new ChatRequest(
             model,
-            [new ChatMessage("user", prompt)],
+            [
+                new ChatMessage("system", SystemPrompt),
+                new ChatMessage("user", prompt),
+            ],
             Stream: false,
             KeepAlive: keepAlive,
             new ChatOptions(temperature, gpuLayers, numPredict, numContext));

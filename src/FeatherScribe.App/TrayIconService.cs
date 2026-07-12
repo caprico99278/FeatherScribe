@@ -4,7 +4,7 @@ using WinForms = System.Windows.Forms;
 namespace FeatherScribe.App;
 
 /// <summary>
-/// タスクトレイ常駐アイコン。表示/再コピー/再貼り付け/終了のメニューと通知を提供する。
+/// タスクトレイ常駐アイコン。表示/コピー/貼り付け/終了のメニューと通知を提供する。
 /// </summary>
 public sealed class TrayIconService : IDisposable
 {
@@ -17,8 +17,9 @@ public sealed class TrayIconService : IDisposable
 
         var menu = new WinForms.ContextMenuStrip();
         menu.Items.Add("画面を表示", null, (_, _) => ShowMainWindow());
-        menu.Items.Add("直近結果を再コピー", null, async (_, _) => await SafeAsync(_mainWindow.RecopyAsync));
-        menu.Items.Add("直近結果を再貼り付け", null, async (_, _) => await SafeAsync(_mainWindow.RepasteAsync));
+        menu.Items.Add("直近rawをもう一度整形", null, (_, _) => _mainWindow.ReformatLast());
+        menu.Items.Add("直近結果をクリップボードにコピー", null, async (_, _) => await SafeAsync(_mainWindow.RecopyAsync));
+        menu.Items.Add("直近結果を直前の入力先へ貼り付け", null, async (_, _) => await SafeAsync(_mainWindow.RepasteAsync));
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add("終了", null, (_, _) => ExitApplication());
 

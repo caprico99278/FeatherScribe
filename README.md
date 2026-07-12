@@ -8,7 +8,7 @@ Windowsローカル環境で完結する音声入力補助アプリ。
 
 ```text
 ホットキー押下 → マイク録音 → whisper.cppで日本語文字起こし
-→ (任意) Gemma 4で文章整形 → クリップボードへコピー → 現在の入力欄へ貼り付け
+→ (任意) Gemma 4で文章整形 → クリップボードへコピー → 直前の入力先へ貼り付け
 ```
 
 音声データ・全文テキストを外部へ送信せず、デフォルトでは保存もしない。
@@ -79,7 +79,10 @@ TinySwallow などの実験用 LLM モデル設定は `appsettings.json` では�
   "llm": {
     "enabled": true,
     "model": "hf.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF:Q5_K_M",
-    "timeoutSeconds": 10
+    "timeoutSeconds": 20,
+    "numPredict": 80,
+    "numContext": 1024,
+    "keepAlive": "30m"
   }
 }
 ```
@@ -146,7 +149,11 @@ dotnet run --project src/FeatherScribe.App
 - `llm.enabled: false` (既定) の間は、全モードがNoFormat相当 (未整形で即貼り付け) になる。
 - PlainFast/PlainQualityは既定で **rawを先に貼り付けた時点で完了**し、整形は
   バックグラウンドで実行される (整形中でも次の録音を開始できる)。整形完了は通知され、
-  結果は「再コピー」「再コピー+貼り付け」で利用する (入力欄の自動置換はしない)。
+  結果は「クリップボードにコピー」または「直前の入力先へ貼り付け」で利用する (入力欄の自動置換はしない)。
+- 整形結果が安全基準で採用されなかった場合もrawは保持され、メイン画面またはトレイの
+  「もう一度整形」から高品質モードで再試行できる。
+- 高品質モードでも採用されなかった候補は画面の「不採用の整形候補」に表示される。
+  内容を確認して問題ない場合だけ「候補を手動採用」で直近結果として使える。
 - 変更は `config/appsettings.json` の `hotkeys` で行う。
 
 ## トラブルシュート
@@ -210,7 +217,7 @@ tools/benchmark_format_models.sh
 ```
 
 Reports are written to `reports/` and are excluded from Git by default.
-Do not adopt a model directly from automatic scores; final adoption requires human confirmation that the generated samples preserve meaning, cleanup self-corrections, and keep proper nouns intact.
+Do not adopt a model directly from automatic scores; final adoption requires human confirmation that the generated samples preserve meaning, cleanup self-corrections, fix obvious particle errors, keep proper nouns intact, and avoid guessing uncertain numbers or times.
 
 - 実装指示書: [docs/work/phase1_implementation_instructions_001.md](docs/work/phase1_implementation_instructions_001.md) / [002](docs/work/phase1_implementation_instructions_002.md)
 - アーキテクチャ: [docs/architecture.md](docs/architecture.md)
