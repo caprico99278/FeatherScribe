@@ -371,3 +371,46 @@ Motion tokens are exposed as `MotionFastDuration`, `MotionNormalDuration`, `Moti
 Reusable control styles are explicit resources: `KeyboardFocusVisualStyle`, `BaseButtonStyle`, `PrimaryButtonStyle`, `SecondaryButtonStyle`, `GhostButtonStyle`, `DangerButtonStyle`, `IconButtonStyle`, `CardBorderStyle`, `ResultCardStyle`, `StatusPillStyle`, `CardGroupBoxStyle`, `ReadOnlyTextBoxStyle`, `ResultTextBoxStyle`, and `AppToolTipStyle`.
 
 `MainWindow.xaml` and `RecordingOverlay.xaml` consume these resources directly while preserving existing control names, event handlers, enabled states, tooltips, wrapping, scroll settings, and overlay window behavior.
+
+## 18. MainWindow Implementation Mapping
+
+The refreshed `MainWindow.xaml` is organized around the daily voice-input loop: understand the current state, read the latest result, then copy or paste it. It keeps the existing code-behind contract while changing the visual hierarchy.
+
+Implemented layout:
+
+1. App header: `FeatherScribe` and `ローカル音声入力`.
+2. Status area: `StatusText` inside `MainStatusBarStyle`, with wrapping enabled for long failure or fallback messages.
+3. Latest result card: `LastResultText` inside `ResultCardStyle`, with the largest text area and an empty-state prompt.
+4. Rejected candidate and warning area: collapsed `SectionExpanderStyle` region containing `RejectedResultText` and `AdoptRejectedButton`.
+5. Action area: `ReformatButton` on the left, with `RecopyButton` and `RepasteButton` grouped on the right.
+6. Operation guide: collapsed `SectionExpanderStyle` region containing `HotkeyHelpText`.
+
+Primary action priority:
+
+- `RepasteButton`: primary action, `PrimaryButtonStyle`.
+- `RecopyButton`: secondary action, `SecondaryButtonStyle`.
+- `ReformatButton`: recovery action, `GhostButtonStyle`.
+- `AdoptRejectedButton`: candidate review action, `SecondaryButtonStyle`, placed inside the rejected candidate area.
+
+MainWindow-specific style keys:
+
+- `MainStatusBarStyle`
+- `SectionExpanderStyle`
+- `ExpanderHeaderTextStyle`
+- `EmptyStateTextStyle`
+- `SubtleBadgeStyle`
+
+State and empty-state behavior:
+
+- `StatusText` remains the code-behind-owned status surface and can display long messages.
+- `LastResultText` remains read-only, selectable, wrapping, and vertically scrollable.
+- The latest-result empty state is XAML-only and appears only while `LastResultText.Text` is empty.
+- `RejectedResultText` remains read-only, wrapping, and vertically scrollable.
+- The rejected-candidate empty state is XAML-only and appears only while `RejectedResultText.Text` is empty.
+- Hotkey registration output remains owned by `HotkeyHelpText` and is moved into the operation guide rather than removed.
+
+Deferred items:
+
+- Animated transitions remain deferred.
+- DPI and hover/focus visual QA require GUI verification.
+- No settings screen, model selector, theme switcher, external icon library, or custom WindowChrome is introduced.

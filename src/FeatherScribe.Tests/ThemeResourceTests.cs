@@ -128,6 +128,11 @@ public sealed class ThemeResourceTests
         "ReadOnlyTextBoxStyle",
         "ResultTextBoxStyle",
         "AppToolTipStyle",
+        "MainStatusBarStyle",
+        "SectionExpanderStyle",
+        "ExpanderHeaderTextStyle",
+        "EmptyStateTextStyle",
+        "SubtleBadgeStyle",
     ];
 
     private static readonly Regex StaticResourceRegex = new(@"\{StaticResource\s+([^},\s]+)", RegexOptions.Compiled);
@@ -210,6 +215,88 @@ public sealed class ThemeResourceTests
         }
     }
 
+    [Fact]
+    public void MainWindow_PreservesRequiredNamedControlsAndClickHandlers()
+    {
+        var document = LoadMainWindowXaml();
+        var requiredNames = new[]
+        {
+            "StatusText",
+            "HotkeyHelpText",
+            "LastResultText",
+            "RejectedResultText",
+            "ReformatButton",
+            "AdoptRejectedButton",
+            "RecopyButton",
+            "RepasteButton",
+        };
+
+        foreach (var name in requiredNames)
+        {
+            Assert.NotNull(FindElementByName(document, name));
+        }
+
+        AssertButtonContract(document, "ReformatButton", "ReformatButton_Click", "GhostButtonStyle");
+        AssertButtonContract(document, "AdoptRejectedButton", "AdoptRejectedButton_Click", "SecondaryButtonStyle");
+        AssertButtonContract(document, "RecopyButton", "RecopyButton_Click", "SecondaryButtonStyle");
+        AssertButtonContract(document, "RepasteButton", "RepasteButton_Click", "PrimaryButtonStyle");
+    }
+
+    [Fact]
+    public void MainWindow_UsesRequestedWindowSizingAndLayoutResources()
+    {
+        var document = LoadMainWindowXaml();
+        var window = document.Root ?? throw new InvalidOperationException("MainWindow root element is missing.");
+
+        Assert.Equal("800", window.Attribute("Width")?.Value);
+        Assert.Equal("540", window.Attribute("Height")?.Value);
+        Assert.Equal("720", window.Attribute("MinWidth")?.Value);
+        Assert.Equal("480", window.Attribute("MinHeight")?.Value);
+        Assert.Equal("CenterScreen", window.Attribute("WindowStartupLocation")?.Value);
+
+        var rootGrid = window.Elements().First(element => element.Name.LocalName == "Grid");
+        Assert.Equal("{StaticResource Inset24}", rootGrid.Attribute("Margin")?.Value);
+    }
+
+    [Fact]
+    public void MainWindow_PlacesResultCandidateAndHotkeyControlsInExpectedRegions()
+    {
+        var document = LoadMainWindowXaml();
+        var lastResult = FindElementByName(document, "LastResultText")!;
+        var rejectedResult = FindElementByName(document, "RejectedResultText")!;
+        var adoptRejected = FindElementByName(document, "AdoptRejectedButton")!;
+        var hotkeyHelp = FindElementByName(document, "HotkeyHelpText")!;
+
+        AssertAncestorStyle(lastResult, "Border", "ResultCardStyle");
+
+        var rejectedExpander = AssertAncestorStyle(rejectedResult, "Expander", "SectionExpanderStyle");
+        Assert.Same(rejectedExpander, adoptRejected.Ancestors().First(element => element.Name.LocalName == "Expander"));
+
+        AssertAncestorStyle(hotkeyHelp, "Expander", "SectionExpanderStyle");
+    }
+
+    [Fact]
+    public void MainWindow_DefinesEmptyStateWithoutReplacingResultControls()
+    {
+        var document = LoadMainWindowXaml();
+        var emptyStateTexts = document
+            .Descendants()
+            .Where(element => element.Name.LocalName == "TextBlock")
+            .Where(element => element.Attribute("Text")?.Value.Contains("ホットキー") == true
+                || element.Attribute("Text")?.Value.Contains("候補がある場合") == true)
+            .ToArray();
+
+        Assert.Equal(2, emptyStateTexts.Length);
+
+        foreach (var text in emptyStateTexts)
+        {
+            Assert.Contains(
+                text.Descendants(),
+                element => element.Name.LocalName == "DataTrigger"
+                    && element.Attribute("Value")?.Value == "");
+        }
+    }
+
     private static ThemeResourceCatalog LoadThemeResourceCatalog()
     {
         var root = FindRepoRoot();
@@ -249,6 +336,40 @@ public sealed class ThemeResourceTests
     private static XDocument LoadXaml(params string[] pathParts)
     {
         return XDocument.Load(Path.Combine(FindRepoRoot(), Path.Combine(pathParts)));
+    }
+
+    private static XDocument LoadMainWindowXaml()
+    {
+        return LoadXaml("src", "FeatherScribe.App", "MainWindow.xaml");
+    }
+
+    private static XElement? FindElementByName(XDocument document, string name)
+    {
+        return document
+            .Descendants()
+            .FirstOrDefault(element => element.Attribute(XamlNamespace + "Name")?.Value == name);
+    }
+
+    private static void AssertButtonContract(XDocument document, string name, string clickHandler, string styleKey)
+    {
+        var button = FindElementByName(document, name) ?? throw new InvalidOperationException($"Missing button: {name}");
+
+        Assert.Equal("Button", button.Name.LocalName);
+        Assert.Equal(clickHandler, button.Attribute("Click")?.Value);
+        Assert.Equal("False", button.Attribute("IsEnabled")?.Value);
+        Assert.NotNull(button.Attribute("ToolTip"));
+        Assert.Equal($"{{StaticResource {styleKey}}}", button.Attribute("Style")?.Value);
+    }
+
+    private static XElement AssertAncestorStyle(XElement element, string ancestorName, string styleKey)
+    {
+        var ancestor = element
+            .Ancestors()
+            .FirstOrDefault(candidate => candidate.Name.LocalName == ancestorName
+                && candidate.Attribute("Style")?.Value == $"{{StaticResource {styleKey}}}");
+
+        Assert.NotNull(ancestor);
+        return ancestor;
     }
 
     private static string FindRepoRoot()

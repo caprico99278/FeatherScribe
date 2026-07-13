@@ -1,54 +1,196 @@
 <Window x:Class="FeatherScribe.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="FeatherScribe" Height="500" Width="760"
+        Title="FeatherScribe" Height="540" Width="800"
+        MinHeight="480" MinWidth="720"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource WindowBackgroundBrush}"
         Foreground="{StaticResource PrimaryTextBrush}"
         FontFamily="{StaticResource AppFontFamily}">
-    <Grid Margin="{StaticResource Inset12}">
+    <Grid Margin="{StaticResource Inset24}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" x:Name="StatusText" Text="待機中" Style="{StaticResource StatusTextStyle}"/>
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0"
+                    Width="3"
+                    Margin="0,3,12,3"
+                    Background="{StaticResource AccentBrush}"
+                    CornerRadius="{StaticResource PillCornerRadius}"/>
+            <StackPanel Grid.Column="1">
+                <TextBlock Text="FeatherScribe" Style="{StaticResource AppTitleTextStyle}"/>
+                <TextBlock Text="ローカル音声入力" Style="{StaticResource CaptionTextStyle}"/>
+            </StackPanel>
+        </Grid>
 
-        <TextBlock Grid.Row="1" x:Name="HotkeyHelpText" Margin="0,8,0,8"
-                   TextWrapping="Wrap" Style="{StaticResource CaptionTextStyle}"/>
+        <Border Grid.Row="1" Style="{StaticResource MainStatusBarStyle}" Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Style="{StaticResource SubtleBadgeStyle}" Margin="0,0,12,0">
+                    <TextBlock Text="状態" Style="{StaticResource CaptionTextStyle}"/>
+                </Border>
+                <TextBlock Grid.Column="1"
+                           x:Name="StatusText"
+                           Text="待機中"
+                           Style="{StaticResource StatusTextStyle}"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
 
-        <GroupBox Grid.Row="2" Header="直近の結果" Style="{StaticResource CardGroupBoxStyle}">
-            <TextBox x:Name="LastResultText" IsReadOnly="True" TextWrapping="Wrap"
-                     VerticalScrollBarVisibility="Auto" BorderThickness="0"
-                     Style="{StaticResource ResultTextBoxStyle}"/>
-        </GroupBox>
+        <Border Grid.Row="2" Style="{StaticResource ResultCardStyle}" Margin="0,0,0,12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="直近の結果" Style="{StaticResource PageTitleTextStyle}"/>
+                    <Border Grid.Column="1" Style="{StaticResource SubtleBadgeStyle}">
+                        <TextBlock Text="コピー・貼り付け対象" Style="{StaticResource CaptionTextStyle}"/>
+                    </Border>
+                </Grid>
+                <Grid Grid.Row="1">
+                    <TextBox x:Name="LastResultText"
+                             IsReadOnly="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             BorderThickness="0"
+                             MinHeight="120"
+                             Style="{StaticResource ResultTextBoxStyle}"/>
+                    <TextBlock Text="ホットキーを押して録音を開始します。"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               IsHitTestVisible="False">
+                        <TextBlock.Style>
+                            <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource EmptyStateTextStyle}">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=LastResultText}" Value="">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+            </Grid>
+        </Border>
 
-        <GroupBox Grid.Row="3" Header="不採用の整形候補 (確認してから手動採用)" Style="{StaticResource CardGroupBoxStyle}">
-            <TextBox x:Name="RejectedResultText" IsReadOnly="True" TextWrapping="Wrap"
-                     VerticalScrollBarVisibility="Auto" BorderThickness="0"
-                     Style="{StaticResource ResultTextBoxStyle}"/>
-        </GroupBox>
+        <Expander Grid.Row="3"
+                  IsExpanded="False"
+                  Style="{StaticResource SectionExpanderStyle}">
+            <Expander.Header>
+                <TextBlock Text="整形候補・警告" Style="{StaticResource ExpanderHeaderTextStyle}"/>
+            </Expander.Header>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0"
+                           Margin="0,0,0,8"
+                           Text="自動採用されなかった整形候補を確認して、必要な場合だけ手動採用できます。"
+                           Style="{StaticResource BodyTextStyle}"
+                           TextWrapping="Wrap"/>
+                <Grid Grid.Row="1">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <TextBox x:Name="RejectedResultText"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 BorderThickness="0"
+                                 MinHeight="56"
+                                 Style="{StaticResource ResultTextBoxStyle}"/>
+                        <TextBlock Text="候補がある場合にここへ表示されます。"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource EmptyStateTextStyle}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=RejectedResultText}" Value="">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                    <Button Grid.Row="1"
+                            x:Name="AdoptRejectedButton"
+                            Content="候補を手動採用"
+                            Margin="0,10,0,0"
+                            HorizontalAlignment="Right"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Click="AdoptRejectedButton_Click"
+                            IsEnabled="False"
+                            ToolTip="不採用候補を確認したうえで、直近結果として採用します。"/>
+                </Grid>
+            </Grid>
+        </Expander>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-            <Button x:Name="ReformatButton" Content="もう一度整形" Padding="12,4" Margin="0,0,8,0"
+        <Grid Grid.Row="4" Margin="0,8,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="0"
+                    x:Name="ReformatButton"
+                    Content="もう一度整形"
+                    Margin="0,0,8,0"
                     Style="{StaticResource GhostButtonStyle}"
-                    Click="ReformatButton_Click" IsEnabled="False"
+                    Click="ReformatButton_Click"
+                    IsEnabled="False"
                     ToolTip="直近のraw結果を使って、バックグラウンド整形をもう一度実行します。"/>
-            <Button x:Name="AdoptRejectedButton" Content="候補を手動採用" Padding="12,4" Margin="0,0,8,0"
-                    Style="{StaticResource SecondaryButtonStyle}"
-                    Click="AdoptRejectedButton_Click" IsEnabled="False"
-                    ToolTip="不採用候補を確認したうえで、直近結果として採用します。"/>
-            <Button x:Name="RecopyButton" Content="クリップボードにコピー" Padding="12,4" Margin="0,0,8,0"
-                    Style="{StaticResource SecondaryButtonStyle}"
-                    Click="RecopyButton_Click" IsEnabled="False"
-                    ToolTip="直近の結果をクリップボードに入れます。貼り付けは行いません。"/>
-            <Button x:Name="RepasteButton" Content="直前の入力先へ貼り付け" Padding="12,4"
-                    Style="{StaticResource PrimaryButtonStyle}"
-                    Click="RepasteButton_Click" IsEnabled="False"
-                    ToolTip="直近の結果をクリップボードに入れてから、FeatherScribeの前に使っていたウィンドウへ Ctrl+V を送信します。"/>
-        </StackPanel>
+            <WrapPanel Grid.Column="1" HorizontalAlignment="Right">
+                <Button x:Name="RecopyButton"
+                        Content="クリップボードにコピー"
+                        Margin="0,0,8,0"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Click="RecopyButton_Click"
+                        IsEnabled="False"
+                        ToolTip="直近の結果をクリップボードに入れます。貼り付けは行いません。"/>
+                <Button x:Name="RepasteButton"
+                        Content="直前の入力先へ貼り付け"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        Click="RepasteButton_Click"
+                        IsEnabled="False"
+                        ToolTip="直近の結果をクリップボードに入れてから、FeatherScribeの前に使っていたウィンドウへ Ctrl+V を送信します。"/>
+            </WrapPanel>
+        </Grid>
+
+        <Expander Grid.Row="5"
+                  IsExpanded="False"
+                  Style="{StaticResource SectionExpanderStyle}">
+            <Expander.Header>
+                <TextBlock Text="操作ガイド" Style="{StaticResource ExpanderHeaderTextStyle}"/>
+            </Expander.Header>
+            <TextBlock x:Name="HotkeyHelpText"
+                       TextWrapping="Wrap"
+                       Style="{StaticResource CaptionTextStyle}"/>
+        </Expander>
     </Grid>
 </Window>
