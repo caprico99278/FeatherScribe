@@ -4,7 +4,10 @@
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ShowActivated="False"
         SizeToContent="WidthAndHeight" ResizeMode="NoResize">
-    <Border x:Name="Pill" CornerRadius="14" Padding="16,8" Background="#DD222222">
-        <TextBlock x:Name="OverlayText" Foreground="White" FontSize="14" FontWeight="Bold"/>
+    <Border x:Name="Pill"
+            CornerRadius="{StaticResource OverlayCornerRadius}"
+            Padding="{StaticResource OverlayPadding}"
+            Background="{StaticResource OverlayBackgroundBrush}">
+        <TextBlock x:Name="OverlayText" Style="{StaticResource StatusTextStyle}"/>
     </Border>
 </Window>

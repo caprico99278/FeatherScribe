@@ -15,6 +15,8 @@ Windowsローカル環境で完結する音声入力補助アプリ。
 **LLM整形は既定でOFF** (`llm.enabled: false`)。既定動作は「whisper.cppの結果を即貼り付け」の最速構成で、
 整形を有効化した場合もrawを先に貼り付け、整形はバックグラウンドで行う (自動置換なし)。
 
+UIデザイン方針は [docs/ui/visual_direction.md](docs/ui/visual_direction.md) を参照。
+
 ライセンス: proprietary / all rights reserved ([LICENSE](LICENSE)、
 サードパーティは [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))。
 
