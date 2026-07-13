@@ -98,23 +98,10 @@ public partial class App : Application
     {
         pipeline.StageChanged += (stage, message) => Dispatcher.Invoke(() =>
         {
-            switch (stage)
+            var presentation = OverlayPresentationMapper.FromStage(stage);
+            if (presentation.State != OverlayVisualState.Hidden)
             {
-                case PipelineStage.Recording:
-                    _overlay!.ShowStatus("● 録音中", isRecording: true);
-                    break;
-                case PipelineStage.Transcribing:
-                    _overlay!.ShowStatus("文字起こし中…", isRecording: false);
-                    break;
-                case PipelineStage.Formatting:
-                    _overlay!.ShowStatus("整形中…", isRecording: false);
-                    break;
-                case PipelineStage.Outputting:
-                    _overlay!.ShowStatus("貼り付け中…", isRecording: false);
-                    break;
-                case PipelineStage.Completed or PipelineStage.Failed:
-                    _overlay!.HideStatus();
-                    break;
+                _overlay!.ShowPresentation(presentation);
             }
 
             _mainWindow!.UpdateStage(stage, message);
@@ -123,6 +110,7 @@ public partial class App : Application
         controller.Completed += result => Dispatcher.Invoke(() =>
         {
             _mainWindow!.UpdateResult(result);
+            _overlay!.ShowPresentation(OverlayPresentationMapper.FromPipelineResult(result));
 
             if (!result.Success)
             {
@@ -147,6 +135,7 @@ public partial class App : Application
         controller.BackgroundFormattingCompleted += result => Dispatcher.Invoke(() =>
         {
             _mainWindow!.UpdateBackgroundFormatting(result);
+            _overlay!.ShowPresentation(OverlayPresentationMapper.FromBackgroundFormattingResult(result));
 
             if (result.FormattedText is not null)
             {

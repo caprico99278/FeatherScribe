@@ -414,3 +414,62 @@ Deferred items:
 - Animated transitions remain deferred.
 - DPI and hover/focus visual QA require GUI verification.
 - No settings screen, model selector, theme switcher, external icon library, or custom WindowChrome is introduced.
+
+## 19. RecordingOverlay Implementation Mapping
+
+The refreshed `RecordingOverlay` is a non-activating, click-through status pill. It shows only short state feedback and never shows settings, model names, full error details, or transcript body text.
+
+Overlay visual states:
+
+- `Hidden`: overlay is not visible.
+- `Recording`: shows `録音中`, a recording-colored indicator, and elapsed time.
+- `Transcribing`: shows `文字起こし中`.
+- `Formatting`: shows `文章を整えています` or `貼り付け完了・整形中`.
+- `Pasting`: shows `貼り付け中`.
+- `Completed`: shows a short completion message and auto-hides.
+- `Fallback`: shows `未整形の文章を使用しました` and auto-hides.
+- `Warning`: shows a short review-needed message and auto-hides.
+- `Failed`: shows `処理に失敗しました` and auto-hides.
+
+Pipeline and controller mapping:
+
+- `PipelineStage.Recording` maps to `Recording` and starts the presentation-layer elapsed timer.
+- `PipelineStage.Transcribing` maps to `Transcribing`.
+- `PipelineStage.Formatting` maps to `Formatting`.
+- `PipelineStage.Outputting` maps to `Pasting`.
+- `PipelineStage.Completed` does not decide the final overlay state by itself; the final state comes from `PipelineResult` or `BackgroundFormattingResult`.
+- `PipelineStage.Failed` maps to `Failed`.
+- A successful `PipelineResult` with `BackgroundFormattingStarted` maps to persistent `Formatting`, so raw-first paste does not make the overlay disappear while background formatting continues.
+- A fallback `PipelineResult` maps to `Fallback`.
+- A successful result with failed output maps to `Warning`.
+- A normal successful result maps to `Completed`.
+- A successful `BackgroundFormattingResult` maps to `Completed`.
+- A rejected or discarded background formatting result maps to `Warning`.
+- Other background formatting failures map to `Fallback`.
+
+Visual treatment:
+
+- State color uses `RecordingBrush`, `AccentBrush`, `SuccessBrush`, `WarningBrush`, or `DangerBrush`.
+- State is communicated with color, short text, and a compact glyph.
+- The overlay shell uses `OverlayShellStyle`, `OverlayPrimaryTextStyle`, `OverlayTimerTextStyle`, and `OverlayShadowEffect`.
+- Motion uses `MotionNormalDuration`, `MotionEaseOut`, and `MotionEaseInOut`.
+- Recording uses a gentle indicator pulse.
+- Transcribing uses three small dots with sequential opacity changes.
+- Formatting uses a compact horizontal sweep.
+- Pasting uses a short moving arrow/progress glyph.
+- Completed, fallback, warning, and failed states are temporary and auto-hide.
+- Failed remains visible for about 2200ms before auto-hide.
+
+Timer and focus behavior:
+
+- Recording elapsed time is presentation-only and updates once per second.
+- The elapsed timer stops whenever the overlay leaves `Recording`.
+- Auto-hide uses a single presentation timer and is reset when a new state arrives.
+- Show/hide animations are stopped and reused during state transitions.
+- `ShowActivated=False`, `WS_EX_NOACTIVATE`, `WS_EX_TRANSPARENT`, `Focusable=False`, and `IsHitTestVisible=False` keep focus with the target application and allow pointer clicks to pass through.
+
+Deferred items:
+
+- Multi-monitor placement refinement is deferred.
+- Audio-level animation is deferred.
+- GUI verification of focus, click-through behavior, animation smoothness, and DPI scaling requires a Windows desktop test pass.

@@ -3,11 +3,107 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ShowActivated="False"
-        SizeToContent="WidthAndHeight" ResizeMode="NoResize">
-    <Border x:Name="Pill"
-            CornerRadius="{StaticResource OverlayCornerRadius}"
-            Padding="{StaticResource OverlayPadding}"
-            Background="{StaticResource OverlayBackgroundBrush}">
-        <TextBlock x:Name="OverlayText" Style="{StaticResource StatusTextStyle}"/>
-    </Border>
+        SizeToContent="WidthAndHeight" ResizeMode="NoResize"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        Focusable="False" IsHitTestVisible="False">
+    <Grid x:Name="OverlayRoot"
+          Opacity="0"
+          RenderTransformOrigin="0.5,0.5"
+          IsHitTestVisible="False">
+        <Grid.RenderTransform>
+            <TransformGroup>
+                <ScaleTransform x:Name="OverlayScale" ScaleX="0.97" ScaleY="0.97"/>
+                <TranslateTransform x:Name="OverlayTranslate" Y="8"/>
+            </TransformGroup>
+        </Grid.RenderTransform>
+
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="OverlayStates">
+                <VisualState x:Name="Hidden"/>
+                <VisualState x:Name="Recording"/>
+                <VisualState x:Name="Transcribing"/>
+                <VisualState x:Name="Formatting"/>
+                <VisualState x:Name="Pasting"/>
+                <VisualState x:Name="Completed"/>
+                <VisualState x:Name="Fallback"/>
+                <VisualState x:Name="Warning"/>
+                <VisualState x:Name="Failed"/>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
+        <Border x:Name="OverlayShell" Style="{StaticResource OverlayShellStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Grid Grid.Column="0" Width="22" Height="22" Margin="0,0,10,0">
+                    <Ellipse x:Name="IndicatorDot"
+                             Width="18"
+                             Height="18"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center"
+                             Fill="{StaticResource AccentBrush}"
+                             Opacity="0.85"/>
+                    <TextBlock x:Name="StateGlyph"
+                               Text="…"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               FontSize="11"
+                               FontWeight="Bold"
+                               Foreground="{StaticResource WindowBackgroundBrush}"/>
+                    <StackPanel x:Name="TranscribingDots"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Visibility="Collapsed">
+                        <Ellipse x:Name="TranscribingDot1" Width="3.5" Height="3.5" Margin="1,0" Fill="{StaticResource WindowBackgroundBrush}" Opacity="0.35"/>
+                        <Ellipse x:Name="TranscribingDot2" Width="3.5" Height="3.5" Margin="1,0" Fill="{StaticResource WindowBackgroundBrush}" Opacity="0.35"/>
+                        <Ellipse x:Name="TranscribingDot3" Width="3.5" Height="3.5" Margin="1,0" Fill="{StaticResource WindowBackgroundBrush}" Opacity="0.35"/>
+                    </StackPanel>
+                    <Canvas x:Name="FormattingSweep"
+                            Width="16"
+                            Height="10"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Visibility="Collapsed">
+                        <Rectangle Width="7"
+                                   Height="2"
+                                   RadiusX="1"
+                                   RadiusY="1"
+                                   Fill="{StaticResource WindowBackgroundBrush}">
+                            <Rectangle.RenderTransform>
+                                <TranslateTransform x:Name="FormattingSweepTranslate" X="0"/>
+                            </Rectangle.RenderTransform>
+                        </Rectangle>
+                    </Canvas>
+                    <Path x:Name="PastingArrow"
+                          Width="14"
+                          Height="10"
+                          Stretch="Uniform"
+                          Fill="{StaticResource WindowBackgroundBrush}"
+                          Data="M 0 4 L 9 4 L 9 1 L 14 5 L 9 9 L 9 6 L 0 6 Z"
+                          Visibility="Collapsed">
+                        <Path.RenderTransform>
+                            <TranslateTransform x:Name="PastingArrowTranslate" X="-2"/>
+                        </Path.RenderTransform>
+                    </Path>
+                </Grid>
+
+                <TextBlock Grid.Column="1"
+                           x:Name="OverlayText"
+                           Style="{StaticResource OverlayPrimaryTextStyle}"
+                           Text="処理中"/>
+
+                <TextBlock Grid.Column="2"
+                           x:Name="ElapsedText"
+                           Margin="12,0,0,0"
+                           Text="00:00"
+                           Visibility="Collapsed"
+                           Style="{StaticResource OverlayTimerTextStyle}"/>
+            </Grid>
+        </Border>
+    </Grid>
 </Window>

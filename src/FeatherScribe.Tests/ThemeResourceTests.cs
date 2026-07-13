@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using FeatherScribe.App;
 
 namespace FeatherScribe.Tests;
 
@@ -133,6 +134,10 @@ public sealed class ThemeResourceTests
         "ExpanderHeaderTextStyle",
         "EmptyStateTextStyle",
         "SubtleBadgeStyle",
+        "OverlayShellStyle",
+        "OverlayPrimaryTextStyle",
+        "OverlayTimerTextStyle",
+        "OverlayShadowEffect",
     ];
 
     private static readonly Regex StaticResourceRegex = new(@"\{StaticResource\s+([^},\s]+)", RegexOptions.Compiled);
@@ -254,7 +259,11 @@ public sealed class ThemeResourceTests
         Assert.Equal("480", window.Attribute("MinHeight")?.Value);
         Assert.Equal("CenterScreen", window.Attribute("WindowStartupLocation")?.Value);
 
-        var rootGrid = window.Elements().First(element => element.Name.LocalName == "Grid");
+        var scrollViewer = window.Elements().First(element => element.Name.LocalName == "ScrollViewer");
+        Assert.Equal("Auto", scrollViewer.Attribute("VerticalScrollBarVisibility")?.Value);
+        Assert.Equal("Disabled", scrollViewer.Attribute("HorizontalScrollBarVisibility")?.Value);
+
+        var rootGrid = scrollViewer.Elements().First(element => element.Name.LocalName == "Grid");
         Assert.Equal("{StaticResource Inset24}", rootGrid.Attribute("Margin")?.Value);
     }
 
@@ -295,6 +304,99 @@ public sealed class ThemeResourceTests
                 element => element.Name.LocalName == "DataTrigger"
                     && element.Attribute("Value")?.Value == "");
         }
+    }
+
+    [Fact]
+    public void RecordingOverlay_PreservesNonActivatingWindowContract()
+    {
+        var window = LoadRecordingOverlayXaml().Root
+            ?? throw new InvalidOperationException("RecordingOverlay root element is missing.");
+
+        Assert.Equal("None", window.Attribute("WindowStyle")?.Value);
+        Assert.Equal("True", window.Attribute("AllowsTransparency")?.Value);
+        Assert.Equal("Transparent", window.Attribute("Background")?.Value);
+        Assert.Equal("True", window.Attribute("Topmost")?.Value);
+        Assert.Equal("False", window.Attribute("ShowInTaskbar")?.Value);
+        Assert.Equal("False", window.Attribute("ShowActivated")?.Value);
+        Assert.Equal("WidthAndHeight", window.Attribute("SizeToContent")?.Value);
+        Assert.Equal("NoResize", window.Attribute("ResizeMode")?.Value);
+        Assert.Equal("True", window.Attribute("UseLayoutRounding")?.Value);
+        Assert.Equal("True", window.Attribute("SnapsToDevicePixels")?.Value);
+        Assert.Equal("False", window.Attribute("Focusable")?.Value);
+        Assert.Equal("False", window.Attribute("IsHitTestVisible")?.Value);
+    }
+
+    [Fact]
+    public void RecordingOverlay_DefinesRequiredNamedElements()
+    {
+        var document = LoadRecordingOverlayXaml();
+        var requiredNames = new[]
+        {
+            "OverlayRoot",
+            "OverlayShell",
+            "IndicatorDot",
+            "StateGlyph",
+            "TranscribingDots",
+            "TranscribingDot1",
+            "TranscribingDot2",
+            "TranscribingDot3",
+            "FormattingSweep",
+            "FormattingSweepTranslate",
+            "PastingArrow",
+            "PastingArrowTranslate",
+            "OverlayText",
+            "ElapsedText",
+        };
+
+        foreach (var name in requiredNames)
+        {
+            Assert.NotNull(FindElementByName(document, name));
+        }
+
+        Assert.Equal(
+            "{StaticResource OverlayShellStyle}",
+            FindElementByName(document, "OverlayShell")?.Attribute("Style")?.Value);
+        Assert.Equal(
+            "{StaticResource OverlayPrimaryTextStyle}",
+            FindElementByName(document, "OverlayText")?.Attribute("Style")?.Value);
+        Assert.Equal(
+            "{StaticResource OverlayTimerTextStyle}",
+            FindElementByName(document, "ElapsedText")?.Attribute("Style")?.Value);
+    }
+
+    [Fact]
+    public void RecordingOverlay_DefinesAllOverlayVisualStates()
+    {
+        var states = LoadRecordingOverlayXaml()
+            .Descendants()
+            .Where(element => element.Name.LocalName == "VisualState")
+            .Select(element => element.Attribute(XamlNamespace + "Name")?.Value)
+            .Where(value => value is not null)
+            .ToArray();
+
+        Assert.Equal(
+            Enum.GetNames<OverlayVisualState>(),
+            states);
+    }
+
+    [Fact]
+    public void RecordingOverlay_UsesDedicatedProcessingIndicatorsAndSingleHideOwner()
+    {
+        var document = LoadRecordingOverlayXaml();
+        var text = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "FeatherScribe.App", "RecordingOverlay.xaml"));
+        var code = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "FeatherScribe.App", "RecordingOverlay.xaml.cs"));
+        var hiddenState = document
+            .Descendants()
+            .Single(element => element.Name.LocalName == "VisualState"
+                && element.Attribute(XamlNamespace + "Name")?.Value == "Hidden");
+
+        Assert.Contains("MotionNormalDuration", code);
+        Assert.NotNull(FindElementByName(document, "TranscribingDots"));
+        Assert.NotNull(FindElementByName(document, "FormattingSweep"));
+        Assert.NotNull(FindElementByName(document, "PastingArrow"));
+        Assert.DoesNotContain(hiddenState.Descendants(), element => element.Name.LocalName == "Storyboard");
+        Assert.DoesNotContain(document.Descendants(), element => element.Name.LocalName == "Image");
+        Assert.DoesNotContain(document.Descendants(), element => element.Name.LocalName == "BitmapImage");
     }
 
     private static ThemeResourceCatalog LoadThemeResourceCatalog()
@@ -341,6 +443,11 @@ public sealed class ThemeResourceTests
     private static XDocument LoadMainWindowXaml()
     {
         return LoadXaml("src", "FeatherScribe.App", "MainWindow.xaml");
+    }
+
+    private static XDocument LoadRecordingOverlayXaml()
+    {
+        return LoadXaml("src", "FeatherScribe.App", "RecordingOverlay.xaml");
     }
 
     private static XElement? FindElementByName(XDocument document, string name)

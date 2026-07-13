@@ -7,6 +7,8 @@
         Background="{StaticResource WindowBackgroundBrush}"
         Foreground="{StaticResource PrimaryTextBrush}"
         FontFamily="{StaticResource AppFontFamily}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
     <Grid Margin="{StaticResource Inset24}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -193,4 +195,5 @@
                        Style="{StaticResource CaptionTextStyle}"/>
         </Expander>
     </Grid>
+    </ScrollViewer>
 </Window>
