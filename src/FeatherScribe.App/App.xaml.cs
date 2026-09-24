@@ -1,0 +1,189 @@
+using System.Net.Http;
+using System.Windows;
+using FeatherScribe.Core;
+using FeatherScribe.Infrastructure;
+
+namespace FeatherScribe.App;
+
+/// <summary>
+/// コンポジションルート。設定読み込み → パイプライン組み立て → 常駐開始。
+/// </summary>
+public partial class App : Application
+{
+    private HttpClient? _httpClient;
+    private HotkeyService? _hotkeyService;
+    private TrayIconService? _trayIconService;
+    private RecordingOverlay? _overlay;
+    private MainWindow? _mainWindow;
+    private DictationPipeline? _pipeline;
+    private FileEventLog? _eventLog;
+
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+
+        var rootPath = AppRoot.Locate();
+        var settingsProvider = new JsonAppSettingsProvider(rootPath);
+        var settings = settingsProvider.Load();
+
+        var dictionaryProvider = new JsonDictionaryProvider(rootPath);
+        _httpClient = new HttpClient();
+
+        var textOutput = new ClipboardTextOutput(settings.Output);
+        _eventLog = new FileEventLog(rootPath);
+        _pipeline = new DictationPipeline(
+            new NAudioRecorder(settings.Recording),
+            new WhisperCppTranscriptionEngine(settings.Asr),
+            new OllamaGemmaFormatter(_httpClient, settings.Llm, new FilePromptProvider(rootPath), _eventLog),
+            new DictionaryCorrector(dictionaryProvider.Load()),
+            textOutput,
+            dictionaryProvider,
+            _eventLog,
+            settings);
+
+        var controller = new DictationController(_pipeline, settings);
+
+        _overlay = new RecordingOverlay();
+        _mainWindow = new MainWindow(controller, settings, textOutput);
+        _trayIconService = new TrayIconService(_mainWindow);
+        _hotkeyService = new HotkeyService();
+
+        WireEvents(_pipeline, controller);
+
+        // 登録失敗は該当キーのみ無効化し、起動は必ず継続する (指示書002 §2)
+        var hotkeyReport = _hotkeyService.RegisterFromSettings(settings.Hotkeys, controller.Toggle);
+
+        _mainWindow.ShowHotkeyReport(hotkeyReport);
+        _mainWindow.Show();
+
+        if (settingsProvider.LastWarnings.Count > 0)
+        {
+            foreach (var warning in settingsProvider.LastWarnings)
+            {
+                _eventLog.Write(new PipelineEvent(
+                    DateTimeOffset.Now, "settings_warning", false,
+                    warning, 0, "Startup", null, 0));
+            }
+
+            _trayIconService.Notify(
+                "設定読み込み警告",
+                string.Join("\n", settingsProvider.LastWarnings));
+        }
+
+        if (settingsProvider.LastError is not null)
+        {
+            _trayIconService.Notify(
+                "設定読み込みエラー",
+                $"既定値で起動しました: {settingsProvider.LastError}");
+        }
+
+        if (hotkeyReport.HasFailures)
+        {
+            foreach (var failure in hotkeyReport.Failed)
+            {
+                _eventLog.Write(new PipelineEvent(
+                    DateTimeOffset.Now, "hotkey_register", false,
+                    $"{failure.Mode}:{failure.HotkeyText}:{failure.Reason}",
+                    0, failure.Mode.ToString(), null, 0));
+            }
+
+            _trayIconService.Notify(
+                "一部ホットキー登録に失敗しました",
+                string.Join("\n", hotkeyReport.Failed.Select(f => $"{f.Mode}: {f.HotkeyText} ({f.Reason})")) +
+                "\n該当キーのみ無効です。config/appsettings.json の hotkeys で変更できます。");
+        }
+    }
+
+    private void WireEvents(DictationPipeline pipeline, DictationController controller)
+    {
+        pipeline.StageChanged += (stage, message) => Dispatcher.Invoke(() =>
+        {
+            var presentation = OverlayPresentationMapper.FromStage(stage);
+            if (presentation.State != OverlayVisualState.Hidden)
+            {
+                _overlay!.ShowPresentation(presentation);
+            }
+
+            _mainWindow!.UpdateStage(stage, message);
+        });
+
+        controller.Completed += result => Dispatcher.Invoke(() =>
+        {
+            _mainWindow!.UpdateResult(result);
+            _overlay!.ShowPresentation(OverlayPresentationMapper.FromPipelineResult(result));
+
+            if (!result.Success)
+            {
+                _trayIconService!.Notify("FeatherScribe エラー", result.ErrorMessage ?? "処理に失敗しました");
+            }
+            else if (result.UsedFallback)
+            {
+                // 指示書§12.2: 整形失敗/タイムアウトが分かる通知を出す
+                _trayIconService!.Notify(
+                    "整形失敗・未整形で貼り付け",
+                    result.ErrorMessage ?? "整形に失敗/タイムアウトしたため raw transcript を使用しました");
+            }
+            else if (!result.OutputSucceeded)
+            {
+                _trayIconService!.Notify(
+                    "貼り付け失敗",
+                    "結果はアプリ内に保持しています。メイン画面からクリップボードにコピーできます。");
+            }
+        });
+
+        // バックグラウンド整形の完了通知 (ワーカースレッドから来るためDispatcherへ)
+        controller.BackgroundFormattingCompleted += result => Dispatcher.Invoke(() =>
+        {
+            _mainWindow!.UpdateBackgroundFormatting(result);
+            _overlay!.ShowPresentation(OverlayPresentationMapper.FromBackgroundFormattingResult(result));
+
+            if (result.FormattedText is not null)
+            {
+                // 自動置換はしない。ユーザー操作 (コピー/貼り付け) でのみ利用可能。
+                _trayIconService!.Notify(
+                    "整形完了",
+                    "整形結果を「クリップボードにコピー」または「直前の入力先へ貼り付け」で利用できます(自動置換はしません)。");
+            }
+            else
+            {
+                var discarded = result.ErrorMessage?.StartsWith("整形結果を破棄しました:", StringComparison.Ordinal) == true;
+                _trayIconService!.Notify(
+                    discarded ? "整形結果は採用しませんでした" : "バックグラウンド整形に失敗しました",
+                    $"{FormatBackgroundFormattingFailure(result.ErrorMessage)}\nraw transcriptは貼り付け済みです。候補は画面で確認して手動採用できます。");
+            }
+        });
+    }
+
+    private static string FormatBackgroundFormattingFailure(string? errorMessage)
+    {
+        const string discardedPrefix = "整形結果を破棄しました:";
+        if (errorMessage?.StartsWith(discardedPrefix, StringComparison.Ordinal) == true)
+        {
+            var reason = errorMessage[discardedPrefix.Length..].Trim();
+            return $"理由: {ToDisplayReason(reason)}";
+        }
+
+        return errorMessage ?? "整形に失敗しました";
+    }
+
+    private static string ToDisplayReason(string reason)
+        => reason switch
+        {
+            "markdown_structure" => "見出し・箇条書きなどの形式が混入",
+            "heading_or_label" => "見出し・ラベルが混入",
+            "request_phrase_removed" => "文末表現が変化",
+            "time_range_changed" => "時刻範囲表現が変化",
+            "added_forbidden_verb" => "原文にない動詞が追加",
+            "uncertain_time_guessed" => "不確実な時刻を断定補正",
+            _ => reason,
+        };
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _hotkeyService?.Dispose();
+        _trayIconService?.Dispose();
+        _pipeline?.Dispose(); // 実行中のバックグラウンド整形を安全にキャンセル
+        _httpClient?.Dispose();
+        base.OnExit(e);
+    }
+}

@@ -1,0 +1,274 @@
+using System.ComponentModel;
+using System.Windows;
+using FeatherScribe.Core;
+
+namespace FeatherScribe.App;
+
+/// <summary>
+/// 状態表示と直近結果のコピー/貼り付けを行う最小限のメイン画面。
+/// 閉じるボタンはアプリ終了として扱う。
+/// </summary>
+public partial class MainWindow : Window
+{
+    private readonly DictationController _controller;
+    private readonly ITextOutput _output;
+    private readonly ForegroundWindowTracker _foregroundWindowTracker = new();
+
+    public MainWindow(DictationController controller, AppSettings settings, ITextOutput output)
+    {
+        InitializeComponent();
+        _controller = controller;
+        _output = output;
+        Loaded += MainWindow_Loaded;
+
+        var llmState = settings.Llm.Enabled ? "有効" : "無効 (llm.enabled=false / 全モード未整形)";
+        HotkeyHelpText.Text =
+            $"ホットキー(押して録音開始、もう一度押して停止) / LLM整形: {llmState}\n" +
+            $"  {settings.Hotkeys.NoFormat} : NoFormat(最速・整形なし)\n" +
+            $"  {settings.Hotkeys.PlainFast} : PlainFast(軽量整形) / " +
+            $"{settings.Hotkeys.PlainQuality} : PlainQuality(高品質)\n" +
+            $"  {settings.Hotkeys.Polite} : Polite / {settings.Hotkeys.Memo} : Memo / " +
+            $"{settings.Hotkeys.Bullet} : Bullet / {settings.Hotkeys.DevInstruction} : DevInstruction";
+    }
+
+    public void UpdateStage(PipelineStage stage, string? message)
+    {
+        SetStatus(stage switch
+        {
+            PipelineStage.Recording => $"録音中… ({_controller.ActiveMode})",
+            PipelineStage.Transcribing => "文字起こし中…",
+            PipelineStage.Formatting => "Gemma 4 で整形中…",
+            PipelineStage.Outputting => "出力中…",
+            PipelineStage.Completed => message is null ? "完了" : $"完了({message})",
+            PipelineStage.Failed => $"失敗: {message}",
+            _ => StatusText.Text,
+        });
+    }
+
+    public void UpdateResult(PipelineResult result)
+    {
+        if (result is { Success: true, Text: not null })
+        {
+            SetLatestResult(result.Text);
+            RejectedResultText.Text = "";
+            ReformatButton.IsEnabled = true;
+            AdoptRejectedButton.IsEnabled = false;
+            RecopyButton.IsEnabled = true;
+            RepasteButton.IsEnabled = true;
+            if (result.BackgroundFormattingStarted)
+            {
+                SetStatus("raw貼り付け済み・バックグラウンドで整形中…");
+            }
+        }
+        else
+        {
+            SetStatus($"失敗: {result.ErrorMessage}");
+        }
+    }
+
+    /// <summary>バックグラウンド整形の完了 (成功時は直近結果を整形テキストへ更新)。</summary>
+    public void UpdateBackgroundFormatting(BackgroundFormattingResult result)
+    {
+        if (result.FormattedText is { } formatted)
+        {
+            SetLatestResult(formatted);
+            RejectedResultText.Text = "";
+            ReformatButton.IsEnabled = true;
+            AdoptRejectedButton.IsEnabled = false;
+            RecopyButton.IsEnabled = true;
+            RepasteButton.IsEnabled = true;
+            SetStatus("整形完了・コピーまたは直前の入力先への貼り付けができます");
+        }
+        else
+        {
+            if (result.RejectedText is { } rejected)
+            {
+                SetRejectedResult(rejected);
+                AdoptRejectedButton.IsEnabled = true;
+            }
+
+            SetStatus(FormatBackgroundFormattingFailure(result.ErrorMessage));
+        }
+    }
+
+    private static string FormatBackgroundFormattingFailure(string? errorMessage)
+    {
+        const string discardedPrefix = "整形結果を破棄しました:";
+        if (errorMessage?.StartsWith(discardedPrefix, StringComparison.Ordinal) == true)
+        {
+            var reason = errorMessage[discardedPrefix.Length..].Trim();
+            return $"整形結果は採用しませんでした ({ToDisplayReason(reason)})。候補を確認して手動採用できます";
+        }
+
+        return $"バックグラウンド整形失敗 (raw貼り付け済み): {errorMessage}";
+    }
+
+    private static string ToDisplayReason(string reason)
+        => reason switch
+        {
+            "markdown_structure" => "見出し・箇条書きなどの形式が混入",
+            "heading_or_label" => "見出し・ラベルが混入",
+            "request_phrase_removed" => "文末表現が変化",
+            "time_range_changed" => "時刻範囲表現が変化",
+            "added_forbidden_verb" => "原文にない動詞が追加",
+            "uncertain_time_guessed" => "不確実な時刻を断定補正",
+            _ => reason,
+        };
+
+    /// <summary>ホットキー登録結果を画面に表示する (失敗キーは後からここで確認できる)。</summary>
+    public void ShowHotkeyReport(HotkeyRegistrationReport report)
+    {
+        if (!report.HasFailures)
+        {
+            return;
+        }
+
+        HotkeyHelpText.Text +=
+            "\n⚠ 登録失敗 (無効): " +
+            string.Join(" / ", report.Failed.Select(f => $"{f.Mode}: {f.HotkeyText} ({f.Reason})"));
+    }
+
+    public async Task RecopyAsync()
+    {
+        if (_controller.LastResult is { } text)
+        {
+            await _output.OutputAsync(text, OutputMode.ClipboardOnly, CancellationToken.None);
+            SetStatus("直近結果をクリップボードへコピーしました");
+        }
+    }
+
+    public async Task RepasteAsync()
+    {
+        if (_controller.LastResult is { } text)
+        {
+            if (!_foregroundWindowTracker.TryRestoreLastExternalWindow())
+            {
+                await _output.OutputAsync(text, OutputMode.ClipboardOnly, CancellationToken.None);
+                SetStatus("貼り付け先を特定できませんでした。直近結果はクリップボードへコピー済みです");
+                return;
+            }
+
+            await _output.OutputAsync(text, OutputMode.ClipboardAndPaste, CancellationToken.None);
+        }
+    }
+
+    public void ReformatLast()
+    {
+        var mode = _controller.ReformatLast();
+        if (mode is not null)
+        {
+            SetStatus(mode == FormattingMode.PlainQuality
+                ? "直近のraw結果を高品質モードで再整形中…"
+                : "直近のraw結果をバックグラウンドで再整形中…");
+        }
+        else
+        {
+            SetStatus("再整形できるraw結果がありません");
+        }
+    }
+
+    public void AdoptRejectedResult()
+    {
+        if (_controller.AdoptRejectedFormattedResult())
+        {
+            SetLatestResult(_controller.LastResult ?? "");
+            RejectedResultText.Text = "";
+            AdoptRejectedButton.IsEnabled = false;
+            RecopyButton.IsEnabled = true;
+            RepasteButton.IsEnabled = true;
+            SetStatus("不採用候補を手動採用しました。コピーまたは貼り付けできます");
+        }
+        else
+        {
+            SetStatus("手動採用できる候補がありません");
+        }
+    }
+
+    private async void RecopyButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await RecopyAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"コピー失敗: {ex.Message}");
+        }
+    }
+
+    private async void RepasteButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await RepasteAsync();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"貼り付け失敗: {ex.Message}");
+        }
+    }
+
+    private void ReformatButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            ReformatLast();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"再整形開始失敗: {ex.Message}");
+        }
+    }
+
+    private void AdoptRejectedButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            AdoptRejectedResult();
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"手動採用失敗: {ex.Message}");
+        }
+    }
+
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        Loaded -= MainWindow_Loaded;
+        UiMotion.Reveal(MainContentRoot);
+    }
+
+    private void SetStatus(string text)
+    {
+        StatusText.Text = text;
+        UiMotion.SubtleUpdate(StatusText);
+    }
+
+    private void SetLatestResult(string text)
+    {
+        LastResultText.Text = text;
+        UiMotion.RevealResult(LastResultText);
+    }
+
+    private void SetRejectedResult(string text)
+    {
+        RejectedResultText.Text = text;
+        UiMotion.RevealResult(RejectedResultText);
+    }
+
+    /// <summary>トレイの「終了」からメイン画面を閉じる。</summary>
+    public void CloseForExit()
+    {
+        Close();
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        _foregroundWindowTracker.Dispose();
+        if (!Application.Current.Dispatcher.HasShutdownStarted)
+        {
+            Application.Current.Shutdown();
+        }
+    }
+}

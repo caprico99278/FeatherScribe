@@ -1,0 +1,39 @@
+{
+  "profiles": [
+    {
+      "mode": "NoFormat",
+      "promptFile": null,
+      "description": "whisper.cppの結果を即貼り付けする。日常用の最速モード"
+    },
+    {
+      "mode": "PlainFast",
+      "promptFile": "prompts/plain.md",
+      "description": "軽量モデルで整形。短いタイムアウトで失敗時はraw fallback"
+    },
+    {
+      "mode": "PlainQuality",
+      "promptFile": "prompts/plain.md",
+      "description": "高品質モデル (Gemma 4 E4B等) で整形。待ってもよい時だけ使う"
+    },
+    {
+      "mode": "Polite",
+      "promptFile": "prompts/polite.md",
+      "description": "丁寧なビジネス文にする"
+    },
+    {
+      "mode": "Bullet",
+      "promptFile": "prompts/bullet.md",
+      "description": "箇条書きにする"
+    },
+    {
+      "mode": "Memo",
+      "promptFile": "prompts/memo.md",
+      "description": "思考メモとして整理する"
+    },
+    {
+      "mode": "DevInstruction",
+      "promptFile": "prompts/dev_instruction.md",
+      "description": "Codex等に渡す開発指示書風に整理する"
+    }
+  ]
+}

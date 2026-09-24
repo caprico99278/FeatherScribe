@@ -1,0 +1,6 @@
+# 指示書方針: 文字コードUTF-8 / 改行コードLF
+* text=auto eol=lf
+*.ps1 text eol=lf
+*.png binary
+*.ico binary
+*.wav binary

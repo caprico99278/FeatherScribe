@@ -1,0 +1,1 @@
+FeatherScribeのDictationPipelineでOperationIdを使って、古いバックグラウンド整形結果が新しい入力結果を上書きしないようにしてください。
