@@ -139,6 +139,8 @@ Main window target:
 | OverlayRadius | 999 | Recording overlay pill. |
 | PillRadius | 999 | Status pill, small semantic badges. |
 
+`OverlayRadius` and `PillRadius` are caps, not literal radii. WPF `Border` turns a radius larger than the element into an ellipse, so pill styles apply half of the element height through `PillCornerRadiusConverter`, limited by the token.
+
 Avoid highly rounded large cards. Large surfaces should feel refined, not toy-like.
 
 ## 9. Borders and Shadows
@@ -529,4 +531,13 @@ Verification status:
 - Static XAML contract tests cover resource keys, button press motion, expander motion, storyboard target name-scope resolution for every `ControlTemplate`, MainWindow motion hooks, RecordingOverlay shell-entrance conditions, and the single shell-motion owner with its superseded-completion guard.
 - The FlaUI MainWindow contract test lives in the separate `src/FeatherScribe.GuiTests` project and is run explicitly with `dotnet test src/FeatherScribe.GuiTests/FeatherScribe.GuiTests.csproj`. It expands both expanders and scrolls at 720x480. When no Windows GUI is available, the GUI test run is recorded as `ENV_GUI_UNAVAILABLE` in the not-run ledger instead of being skipped by the test itself. The `FlaUI.Core` and `FlaUI.UIA3` test-only dependencies were approved as an exception for Phase UI-4 and are referenced only by the GUI test project.
 - Runtime motion values were sampled frame by frame against the real theme resources: expander chevron and content motion, button press/release and rapid press bursts (no residual scale, neighbors do not move), rapid `UiMotion` status updates, overlay Recording→Transcribing→Formatting→Completed without a shell fade, overlay hide interruption and recovery, the overlay not taking the foreground window, and no clocks remaining after hide.
-- Not run (`ENV_GUI_UNAVAILABLE`): perceived smoothness and flicker by eye, physical mouse/keyboard input, click-through with real pointer input, and DPI at 100%, 125%, and 150%.
+- Real-screen verification (screen capture plus real OS mouse/keyboard input, at 225% display scale) confirmed:
+  - MainWindow at 720x480: both expanders open and scroll to the end; no text clipping or overlap.
+  - Button hover, mouse press (0.98 then back to 1.0), disabled button not scaling on click, keyboard focus ring, and Space key press with no residual scale after rapid presses. Neighboring buttons do not move.
+  - RecordingOverlay in every state (Recording, Transcribing, Formatting, Pasting, raw pasted with background formatting, formatting completed, fallback, warning, failed).
+  - Overlay entrance frames, no shell fade across visible state transitions, recovery when hide is interrupted by a new recording, and auto-hide after Completed (about 1.2 s).
+  - While the overlay is shown, the foreground window and keyboard focus stay in the target window, real typing reaches it, and a real click on the overlay passes through to the window beneath.
+- Not run: DPI at 100%, 125%, and 150% (requires changing the Windows display scale; only 225% was available), and subjective smoothness judged by a human eye.
+- Findings from the real-screen verification, fixed in Phase UI-4:
+  - The overlay and the MainWindow badges rendered as ellipses instead of pills, because WPF `Border` scales an oversized radius (999) proportionally in both directions. `OverlayShellStyle`, `StatusPillStyle`, and `SubtleBadgeStyle` now bind `CornerRadius` to half of `ActualHeight` through `PillCornerRadiusConverter`, capped by `OverlayCornerRadius` or `PillCornerRadius`.
+  - `LastResultText` and `RejectedResultText` showed no visible indicator when they received keyboard focus. `ReadOnlyTextBoxStyle` now uses the shared `KeyboardFocusVisualStyle` focus ring.

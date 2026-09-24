@@ -456,6 +456,39 @@ public sealed class ThemeResourceTests
                 && element.Attribute("Property")?.Value == "RenderTransform");
     }
 
+    [Theory]
+    [InlineData("StatusPillStyle", "PillCornerRadius")]
+    [InlineData("SubtleBadgeStyle", "PillCornerRadius")]
+    [InlineData("OverlayShellStyle", "OverlayCornerRadius")]
+    public void Controls_PillStylesDeriveCornerRadiusFromHeight(string styleKey, string radiusToken)
+    {
+        // A raw 999 CornerRadius renders an ellipse in WPF; pills must use half the height.
+        var style = FindResourceByKey(LoadControlsXaml(), styleKey);
+        var cornerRadius = style
+            .Elements()
+            .Single(element => element.Name.LocalName == "Setter"
+                && element.Attribute("Property")?.Value == "CornerRadius")
+            .Attribute("Value")?.Value;
+
+        Assert.NotNull(cornerRadius);
+        Assert.Contains("Binding ActualHeight", cornerRadius);
+        Assert.Contains("RelativeSource Self", cornerRadius);
+        Assert.Contains("Converter={StaticResource PillCornerRadiusConverter}", cornerRadius);
+        Assert.Contains($"ConverterParameter={{StaticResource {radiusToken}}}", cornerRadius);
+    }
+
+    [Fact]
+    public void Controls_ReadOnlyTextBoxShowsKeyboardFocusRing()
+    {
+        var style = FindResourceByKey(LoadControlsXaml(), "ReadOnlyTextBoxStyle");
+
+        Assert.Contains(
+            style.Elements(),
+            element => element.Name.LocalName == "Setter"
+                && element.Attribute("Property")?.Value == "FocusVisualStyle"
+                && element.Attribute("Value")?.Value == "{StaticResource KeyboardFocusVisualStyle}");
+    }
+
     [Fact]
     public void Controls_StoryboardTargetsResolveWithinOwningTemplateNameScope()
     {
