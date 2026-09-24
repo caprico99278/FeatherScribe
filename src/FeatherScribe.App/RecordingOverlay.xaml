@@ -13,7 +13,7 @@
         <Grid.RenderTransform>
             <TransformGroup>
                 <ScaleTransform x:Name="OverlayScale" ScaleX="0.97" ScaleY="0.97"/>
-                <TranslateTransform x:Name="OverlayTranslate" Y="8"/>
+                <TranslateTransform x:Name="OverlayTranslate" Y="{StaticResource MotionRevealOffset}"/>
             </TransformGroup>
         </Grid.RenderTransform>
 

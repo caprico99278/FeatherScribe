@@ -7,9 +7,16 @@
         Background="{StaticResource WindowBackgroundBrush}"
         Foreground="{StaticResource PrimaryTextBrush}"
         FontFamily="{StaticResource AppFontFamily}">
-    <ScrollViewer VerticalScrollBarVisibility="Auto"
+    <ScrollViewer x:Name="MainContentScrollViewer"
+                  AutomationProperties.AutomationId="MainContentScrollViewer"
+                  VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled">
-    <Grid Margin="{StaticResource Inset24}">
+    <Grid x:Name="MainContentRoot"
+          Margin="{StaticResource Inset24}"
+          Opacity="0">
+        <Grid.RenderTransform>
+            <TranslateTransform Y="{StaticResource MotionRevealOffset}"/>
+        </Grid.RenderTransform>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -97,6 +104,8 @@
         </Border>
 
         <Expander Grid.Row="3"
+                  x:Name="CandidateExpander"
+                  AutomationProperties.AutomationId="CandidateExpander"
                   IsExpanded="False"
                   Style="{StaticResource SectionExpanderStyle}">
             <Expander.Header>
@@ -185,6 +194,8 @@
         </Grid>
 
         <Expander Grid.Row="5"
+                  x:Name="OperationGuideExpander"
+                  AutomationProperties.AutomationId="OperationGuideExpander"
                   IsExpanded="False"
                   Style="{StaticResource SectionExpanderStyle}">
             <Expander.Header>

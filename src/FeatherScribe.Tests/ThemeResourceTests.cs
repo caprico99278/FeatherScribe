@@ -111,6 +111,10 @@ public sealed class ThemeResourceTests
         "MotionSlowDuration",
         "MotionEaseOut",
         "MotionEaseInOut",
+        "MotionPressScale",
+        "MotionRevealOffset",
+        "MotionSubtleOffset",
+        "MotionMutedOpacity",
     ];
 
     private static readonly string[] RequiredControlStyleKeys =
@@ -265,6 +269,12 @@ public sealed class ThemeResourceTests
 
         var rootGrid = scrollViewer.Elements().First(element => element.Name.LocalName == "Grid");
         Assert.Equal("{StaticResource Inset24}", rootGrid.Attribute("Margin")?.Value);
+        Assert.Equal("MainContentRoot", rootGrid.Attribute(XamlNamespace + "Name")?.Value);
+        Assert.Equal("0", rootGrid.Attribute("Opacity")?.Value);
+        Assert.Contains(
+            rootGrid.Descendants(),
+            element => element.Name.LocalName == "TranslateTransform"
+                && element.Attribute("Y")?.Value == "{StaticResource MotionRevealOffset}");
     }
 
     [Fact]
@@ -383,7 +393,6 @@ public sealed class ThemeResourceTests
     public void RecordingOverlay_UsesDedicatedProcessingIndicatorsAndSingleHideOwner()
     {
         var document = LoadRecordingOverlayXaml();
-        var text = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "FeatherScribe.App", "RecordingOverlay.xaml"));
         var code = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "FeatherScribe.App", "RecordingOverlay.xaml.cs"));
         var hiddenState = document
             .Descendants()
@@ -397,6 +406,75 @@ public sealed class ThemeResourceTests
         Assert.DoesNotContain(hiddenState.Descendants(), element => element.Name.LocalName == "Storyboard");
         Assert.DoesNotContain(document.Descendants(), element => element.Name.LocalName == "Image");
         Assert.DoesNotContain(document.Descendants(), element => element.Name.LocalName == "BitmapImage");
+    }
+
+    [Fact]
+    public void Controls_ButtonTemplateUsesPressScaleMotionWithoutLayoutTransform()
+    {
+        var document = LoadControlsXaml();
+        var baseButtonStyle = FindResourceByKey(document, "BaseButtonStyle");
+        var primaryButtonStyle = FindResourceByKey(document, "PrimaryButtonStyle");
+
+        AssertButtonPressMotion(baseButtonStyle);
+        AssertButtonPressMotion(primaryButtonStyle);
+        Assert.DoesNotContain(
+            document.Descendants(),
+            element => element.Name.LocalName == "LayoutTransform");
+    }
+
+    [Fact]
+    public void Controls_ExpanderTemplateUsesChevronAndContentMotion()
+    {
+        var document = LoadControlsXaml();
+        var expanderStyle = FindResourceByKey(document, "SectionExpanderStyle");
+
+        Assert.NotNull(FindDescendantByName(expanderStyle, "ChevronRotate"));
+        Assert.NotNull(FindDescendantByName(expanderStyle, "ExpandSite"));
+        Assert.NotNull(FindDescendantByName(expanderStyle, "ExpandSiteTranslate"));
+        Assert.Contains(
+            expanderStyle.Descendants(),
+            element => element.Name.LocalName == "DoubleAnimation"
+                && element.Attribute("Storyboard.TargetName")?.Value == "ChevronRotate"
+                && element.Attribute("Duration")?.Value == "{StaticResource MotionNormalDuration}");
+        Assert.Contains(
+            expanderStyle.Descendants(),
+            element => element.Name.LocalName == "DoubleAnimation"
+                && element.Attribute("Storyboard.TargetName")?.Value == "ExpandSite"
+                && element.Attribute("Storyboard.TargetProperty")?.Value == "Opacity");
+        Assert.Contains(
+            expanderStyle.Descendants(),
+            element => element.Name.LocalName == "DoubleAnimation"
+                && element.Attribute("Storyboard.TargetName")?.Value == "ExpandSiteTranslate"
+                && element.Attribute("Storyboard.TargetProperty")?.Value == "Y");
+    }
+
+    [Fact]
+    public void MainWindow_CodeBehindUsesUiMotionForDisplayUpdates()
+    {
+        var code = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "FeatherScribe.App", "MainWindow.xaml.cs"));
+
+        Assert.Contains("Loaded += MainWindow_Loaded;", code);
+        Assert.Contains("UiMotion.Reveal(MainContentRoot);", code);
+        Assert.Contains("UiMotion.SubtleUpdate(StatusText);", code);
+        Assert.Contains("UiMotion.RevealResult(LastResultText);", code);
+        Assert.Contains("UiMotion.RevealResult(RejectedResultText);", code);
+    }
+
+    [Fact]
+    public void RecordingOverlay_OnlyRunsShellEntranceWhenWindowWasNotVisible()
+    {
+        var document = LoadRecordingOverlayXaml();
+        var code = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "FeatherScribe.App", "RecordingOverlay.xaml.cs"));
+
+        Assert.Contains(
+            document.Descendants(),
+            element => element.Name.LocalName == "TranslateTransform"
+                && element.Attribute(XamlNamespace + "Name")?.Value == "OverlayTranslate"
+                && element.Attribute("Y")?.Value == "{StaticResource MotionRevealOffset}");
+        Assert.Contains("var wasVisible = IsVisible;", code);
+        Assert.Contains("PrepareShellForEntrance();", code);
+        Assert.Contains("RestoreShellToVisibleState();", code);
+        Assert.Contains("if (wasVisible)", code);
     }
 
     private static ThemeResourceCatalog LoadThemeResourceCatalog()
@@ -450,11 +528,48 @@ public sealed class ThemeResourceTests
         return LoadXaml("src", "FeatherScribe.App", "RecordingOverlay.xaml");
     }
 
+    private static XDocument LoadControlsXaml()
+    {
+        return LoadXaml("src", "FeatherScribe.App", "Themes", "Controls.xaml");
+    }
+
     private static XElement? FindElementByName(XDocument document, string name)
     {
         return document
             .Descendants()
             .FirstOrDefault(element => element.Attribute(XamlNamespace + "Name")?.Value == name);
+    }
+
+    private static XElement FindResourceByKey(XDocument document, string key)
+    {
+        return document
+            .Descendants()
+            .FirstOrDefault(element => element.Attribute(XamlNamespace + "Key")?.Value == key)
+            ?? throw new InvalidOperationException($"Missing resource: {key}");
+    }
+
+    private static XElement? FindDescendantByName(XElement element, string name)
+    {
+        return element
+            .Descendants()
+            .FirstOrDefault(candidate => candidate.Attribute(XamlNamespace + "Name")?.Value == name);
+    }
+
+    private static void AssertButtonPressMotion(XElement style)
+    {
+        Assert.NotNull(FindDescendantByName(style, "ButtonScale"));
+        Assert.Contains(
+            style.Descendants(),
+            element => element.Name.LocalName == "DoubleAnimation"
+                && element.Attribute("Storyboard.TargetName")?.Value == "ButtonScale"
+                && element.Attribute("To")?.Value == "{StaticResource MotionPressScale}"
+                && element.Attribute("Duration")?.Value == "{StaticResource MotionFastDuration}");
+        Assert.Contains(
+            style.Descendants(),
+            element => element.Name.LocalName == "DoubleAnimation"
+                && element.Attribute("Storyboard.TargetName")?.Value == "ButtonScale"
+                && element.Attribute("To")?.Value == "1"
+                && element.Attribute("Duration")?.Value == "{StaticResource MotionFastDuration}");
     }
 
     private static void AssertButtonContract(XDocument document, string name, string clickHandler, string styleKey)

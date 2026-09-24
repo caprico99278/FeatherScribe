@@ -48,6 +48,7 @@ public partial class RecordingOverlay : Window
             return;
         }
 
+        var wasVisible = IsVisible;
         StopAutoHideTimer();
         StopHideAnimation();
         StopStateAnimations();
@@ -58,12 +59,21 @@ public partial class RecordingOverlay : Window
 
         if (!IsVisible)
         {
+            PrepareShellForEntrance();
             Show();
         }
 
         VisualStateManager.GoToElementState(OverlayRoot, presentation.State.ToString(), useTransitions: true);
         PositionAtBottomCenter();
-        StartShowAnimation();
+        if (wasVisible)
+        {
+            RestoreShellToVisibleState();
+        }
+        else
+        {
+            StartShowAnimation();
+        }
+
         StartStateAnimation(presentation.State);
 
         if (!presentation.IsPersistent && presentation.AutoHideDelay > TimeSpan.Zero)
@@ -153,6 +163,22 @@ public partial class RecordingOverlay : Window
         OverlayTranslate.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, duration) { EasingFunction = easing });
         OverlayScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1, duration) { EasingFunction = easing });
         OverlayScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1, duration) { EasingFunction = easing });
+    }
+
+    private void PrepareShellForEntrance()
+    {
+        OverlayRoot.Opacity = 0;
+        OverlayTranslate.Y = GetDouble("MotionRevealOffset", 6);
+        OverlayScale.ScaleX = 0.97;
+        OverlayScale.ScaleY = 0.97;
+    }
+
+    private void RestoreShellToVisibleState()
+    {
+        OverlayRoot.Opacity = 1;
+        OverlayTranslate.Y = 0;
+        OverlayScale.ScaleX = 1;
+        OverlayScale.ScaleY = 1;
     }
 
     private void StartHideAnimation()
@@ -313,6 +339,9 @@ public partial class RecordingOverlay : Window
 
     private Duration GetDuration(string key, TimeSpan fallback)
         => TryFindResource(key) is Duration duration ? duration : new Duration(fallback);
+
+    private double GetDouble(string key, double fallback)
+        => TryFindResource(key) is double value ? value : fallback;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int GetWindowLong(IntPtr hWnd, int nIndex);

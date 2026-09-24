@@ -19,6 +19,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         _controller = controller;
         _output = output;
+        Loaded += MainWindow_Loaded;
 
         var llmState = settings.Llm.Enabled ? "有効" : "無効 (llm.enabled=false / 全モード未整形)";
         HotkeyHelpText.Text =
@@ -32,7 +33,7 @@ public partial class MainWindow : Window
 
     public void UpdateStage(PipelineStage stage, string? message)
     {
-        StatusText.Text = stage switch
+        SetStatus(stage switch
         {
             PipelineStage.Recording => $"録音中… ({_controller.ActiveMode})",
             PipelineStage.Transcribing => "文字起こし中…",
@@ -41,14 +42,14 @@ public partial class MainWindow : Window
             PipelineStage.Completed => message is null ? "完了" : $"完了({message})",
             PipelineStage.Failed => $"失敗: {message}",
             _ => StatusText.Text,
-        };
+        });
     }
 
     public void UpdateResult(PipelineResult result)
     {
         if (result is { Success: true, Text: not null })
         {
-            LastResultText.Text = result.Text;
+            SetLatestResult(result.Text);
             RejectedResultText.Text = "";
             ReformatButton.IsEnabled = true;
             AdoptRejectedButton.IsEnabled = false;
@@ -56,12 +57,12 @@ public partial class MainWindow : Window
             RepasteButton.IsEnabled = true;
             if (result.BackgroundFormattingStarted)
             {
-                StatusText.Text = "raw貼り付け済み・バックグラウンドで整形中…";
+                SetStatus("raw貼り付け済み・バックグラウンドで整形中…");
             }
         }
         else
         {
-            StatusText.Text = $"失敗: {result.ErrorMessage}";
+            SetStatus($"失敗: {result.ErrorMessage}");
         }
     }
 
@@ -70,23 +71,23 @@ public partial class MainWindow : Window
     {
         if (result.FormattedText is { } formatted)
         {
-            LastResultText.Text = formatted;
+            SetLatestResult(formatted);
             RejectedResultText.Text = "";
             ReformatButton.IsEnabled = true;
             AdoptRejectedButton.IsEnabled = false;
             RecopyButton.IsEnabled = true;
             RepasteButton.IsEnabled = true;
-            StatusText.Text = "整形完了・コピーまたは直前の入力先への貼り付けができます";
+            SetStatus("整形完了・コピーまたは直前の入力先への貼り付けができます");
         }
         else
         {
             if (result.RejectedText is { } rejected)
             {
-                RejectedResultText.Text = rejected;
+                SetRejectedResult(rejected);
                 AdoptRejectedButton.IsEnabled = true;
             }
 
-            StatusText.Text = FormatBackgroundFormattingFailure(result.ErrorMessage);
+            SetStatus(FormatBackgroundFormattingFailure(result.ErrorMessage));
         }
     }
 
@@ -132,7 +133,7 @@ public partial class MainWindow : Window
         if (_controller.LastResult is { } text)
         {
             await _output.OutputAsync(text, OutputMode.ClipboardOnly, CancellationToken.None);
-            StatusText.Text = "直近結果をクリップボードへコピーしました";
+            SetStatus("直近結果をクリップボードへコピーしました");
         }
     }
 
@@ -143,7 +144,7 @@ public partial class MainWindow : Window
             if (!_foregroundWindowTracker.TryRestoreLastExternalWindow())
             {
                 await _output.OutputAsync(text, OutputMode.ClipboardOnly, CancellationToken.None);
-                StatusText.Text = "貼り付け先を特定できませんでした。直近結果はクリップボードへコピー済みです";
+                SetStatus("貼り付け先を特定できませんでした。直近結果はクリップボードへコピー済みです");
                 return;
             }
 
@@ -156,13 +157,13 @@ public partial class MainWindow : Window
         var mode = _controller.ReformatLast();
         if (mode is not null)
         {
-            StatusText.Text = mode == FormattingMode.PlainQuality
+            SetStatus(mode == FormattingMode.PlainQuality
                 ? "直近のraw結果を高品質モードで再整形中…"
-                : "直近のraw結果をバックグラウンドで再整形中…";
+                : "直近のraw結果をバックグラウンドで再整形中…");
         }
         else
         {
-            StatusText.Text = "再整形できるraw結果がありません";
+            SetStatus("再整形できるraw結果がありません");
         }
     }
 
@@ -170,16 +171,16 @@ public partial class MainWindow : Window
     {
         if (_controller.AdoptRejectedFormattedResult())
         {
-            LastResultText.Text = _controller.LastResult ?? "";
+            SetLatestResult(_controller.LastResult ?? "");
             RejectedResultText.Text = "";
             AdoptRejectedButton.IsEnabled = false;
             RecopyButton.IsEnabled = true;
             RepasteButton.IsEnabled = true;
-            StatusText.Text = "不採用候補を手動採用しました。コピーまたは貼り付けできます";
+            SetStatus("不採用候補を手動採用しました。コピーまたは貼り付けできます");
         }
         else
         {
-            StatusText.Text = "手動採用できる候補がありません";
+            SetStatus("手動採用できる候補がありません");
         }
     }
 
@@ -191,7 +192,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"コピー失敗: {ex.Message}";
+            SetStatus($"コピー失敗: {ex.Message}");
         }
     }
 
@@ -203,7 +204,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"貼り付け失敗: {ex.Message}";
+            SetStatus($"貼り付け失敗: {ex.Message}");
         }
     }
 
@@ -215,7 +216,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"再整形開始失敗: {ex.Message}";
+            SetStatus($"再整形開始失敗: {ex.Message}");
         }
     }
 
@@ -227,8 +228,32 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"手動採用失敗: {ex.Message}";
+            SetStatus($"手動採用失敗: {ex.Message}");
         }
+    }
+
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        Loaded -= MainWindow_Loaded;
+        UiMotion.Reveal(MainContentRoot);
+    }
+
+    private void SetStatus(string text)
+    {
+        StatusText.Text = text;
+        UiMotion.SubtleUpdate(StatusText);
+    }
+
+    private void SetLatestResult(string text)
+    {
+        LastResultText.Text = text;
+        UiMotion.RevealResult(LastResultText);
+    }
+
+    private void SetRejectedResult(string text)
+    {
+        RejectedResultText.Text = text;
+        UiMotion.RevealResult(RejectedResultText);
     }
 
     /// <summary>トレイの「終了」からメイン画面を閉じる。</summary>

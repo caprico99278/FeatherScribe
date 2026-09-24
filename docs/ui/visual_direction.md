@@ -411,7 +411,6 @@ State and empty-state behavior:
 
 Deferred items:
 
-- Animated transitions remain deferred.
 - DPI and hover/focus visual QA require GUI verification.
 - No settings screen, model selector, theme switcher, external icon library, or custom WindowChrome is introduced.
 
@@ -473,3 +472,47 @@ Deferred items:
 - Multi-monitor placement refinement is deferred.
 - Audio-level animation is deferred.
 - GUI verification of focus, click-through behavior, animation smoothness, and DPI scaling requires a Windows desktop test pass.
+
+## 20. Motion Implementation Mapping
+
+Phase UI-4 applies short presentation motion to the existing WPF surface without changing dictation, transcription, formatting, validation, hotkey, clipboard, or paste behavior.
+
+Motion resource ownership:
+
+- `Themes/Motion.xaml` owns `MotionFastDuration`, `MotionNormalDuration`, `MotionSlowDuration`, `MotionEaseOut`, `MotionEaseInOut`, `MotionPressScale`, `MotionRevealOffset`, `MotionSubtleOffset`, and `MotionMutedOpacity`.
+- XAML templates consume these resources directly for button and expander motion.
+- `UiMotion` consumes the same resources for MainWindow display updates.
+- `RecordingOverlay` consumes the same resources for shell entrance and hide/recovery animation.
+
+Implemented motion:
+
+- MainWindow initial display: `MainContentRoot` reveals once on `Loaded` with opacity and a short vertical offset.
+- Status updates: `StatusText.Text` updates immediately, then receives a subtle fade/translate motion.
+- Result updates: `LastResultText.Text` updates immediately, then receives a short reveal motion.
+- Rejected candidate updates: `RejectedResultText.Text` updates immediately when a candidate is available, then receives a short reveal motion. The expander is not opened automatically.
+- Button press: buttons using `BaseButtonStyle` or derived templates scale with `RenderTransform` only, using `MotionPressScale` and `MotionFastDuration`.
+- Expander: `SectionExpanderStyle` rotates the chevron from -90 degrees to 0 degrees and reveals content with opacity plus a small translate motion.
+- RecordingOverlay shell entrance: the shell entrance runs only when the overlay is shown from a non-visible state.
+- RecordingOverlay state update: state changes while visible update text, color, glyph, elapsed timer, and state-specific indicator motion without fading the whole shell out and in.
+- RecordingOverlay hide interruption: if a new presentation arrives while hide is in progress, hide animation is stopped and the shell returns to the visible state before applying the new presentation.
+
+Animation stop and race policy:
+
+- MainWindow motion never waits before updating text.
+- `UiMotion` stops the previous animation before starting the next one and clears animation clocks after completion.
+- Overlay state-specific loop animations are stopped before starting the next state animation.
+- Overlay auto-hide and recording timers remain one timer each.
+- Animation completion is not used as a business-processing completion condition.
+
+Not implemented in this phase:
+
+- Reduced Motion settings screen.
+- Motion settings screen.
+- Audio-level animation.
+- Large page choreography or decorative persistent animation.
+- External animation, icon, or UI libraries.
+
+Verification status:
+
+- Static XAML contract tests cover resource keys, button press motion, expander motion, MainWindow motion hooks, and RecordingOverlay shell-entrance conditions.
+- Windows GUI verification is still required for perceived smoothness, focus retention, click-through behavior, and DPI behavior.
