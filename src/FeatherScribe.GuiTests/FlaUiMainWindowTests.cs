@@ -10,10 +10,8 @@ namespace FeatherScribe.GuiTests;
 
 public sealed class FlaUiMainWindowTests
 {
-    private const double NoScroll = -1;
-
     [Fact]
-    public void MainWindow_FlaUiContract_CanExpandBothSectionsAndScrollAt720By480()
+    public void MainWindow_FlaUiContract_DoesNotScrollAtStartupOrWhenSectionsExpandAt720Width()
     {
         var appPath = FindAppExecutable();
         using var app = Application.Launch(appPath);
@@ -23,30 +21,34 @@ public sealed class FlaUiMainWindowTests
         {
             var window = app.GetMainWindow(automation, TimeSpan.FromSeconds(10));
             Assert.NotNull(window);
+            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(500));
+            AssertFitsWithoutScrolling(window, "startup");
 
-            ResizeWindow(window, width: 720, height: 480);
+            ResizeWindowWidth(window, width: 720);
             Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(250));
 
             AssertRequiredControlsBeforeExpansion(window);
             AssertVisibleButtonsInitialState(window);
+            AssertFitsWithoutScrolling(window, "startup at 720 width");
 
-            ExpandByClick(window, "OperationGuideExpander");
-            ExpandByClick(window, "CandidateExpander");
-            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(250));
+            SetExpandedByClick(window, "CandidateExpander", expanded: true);
+            AssertFitsWithoutScrolling(window, "candidate expanded");
+            SetExpandedByClick(window, "CandidateExpander", expanded: false);
+
+            SetExpandedByClick(window, "OperationGuideExpander", expanded: true);
+            AssertFitsWithoutScrolling(window, "operation guide expanded");
+
+            SetExpandedByClick(window, "CandidateExpander", expanded: true);
             AssertRequiredControlsAfterExpansion(window);
             AssertCandidateButtonInitialState(window);
-
-            var scrollViewer = FindRequired(window, "MainContentScrollViewer");
-            Assert.True(scrollViewer.Patterns.Scroll.IsSupported, "MainContentScrollViewer must support ScrollPattern.");
-
-            var scroll = scrollViewer.Patterns.Scroll.Pattern;
-            Assert.True(scroll.VerticallyScrollable.Value, "MainContentScrollViewer must be vertically scrollable with both sections expanded at 720x480.");
-
-            scroll.SetScrollPercent(NoScroll, 100);
-            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(250));
+            AssertFitsWithoutScrolling(window, "both expanded");
 
             var hotkeyHelp = FindRequired(window, "HotkeyHelpText");
             Assert.False(hotkeyHelp.Properties.IsOffscreen.Value);
+
+            SetExpandedByClick(window, "CandidateExpander", expanded: false);
+            SetExpandedByClick(window, "OperationGuideExpander", expanded: false);
+            AssertFitsWithoutScrolling(window, "both collapsed again");
 
             window.Focus();
             Assert.True(window.Properties.HasKeyboardFocus.Value || window.Properties.IsKeyboardFocusable.Value);
@@ -100,10 +102,16 @@ public sealed class FlaUiMainWindowTests
         Assert.False(FindRequired(window, "AdoptRejectedButton").AsButton().IsEnabled);
     }
 
-    private static void ExpandByClick(Window window, string automationId)
+    private static void SetExpandedByClick(Window window, string automationId, bool expanded)
     {
         var element = FindRequired(window, automationId);
         Assert.True(element.Patterns.ExpandCollapse.IsSupported, $"{automationId} must support ExpandCollapsePattern.");
+        var expected = expanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
+        if (element.Patterns.ExpandCollapse.Pattern.ExpandCollapseState.Value == expected)
+        {
+            return;
+        }
+
         var headerButton = element.FindFirstDescendant(cf => cf.ByControlType(ControlType.Button))
             ?? throw new InvalidOperationException($"{automationId} header button was not found.");
         if (headerButton.Patterns.Toggle.IsSupported)
@@ -114,8 +122,35 @@ public sealed class FlaUiMainWindowTests
         {
             headerButton.Click();
         }
-        Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(250));
-        Assert.Equal(ExpandCollapseState.Expanded, element.Patterns.ExpandCollapse.Pattern.ExpandCollapseState.Value);
+
+        // Expander motion plus the window height refit.
+        Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(400));
+        Assert.Equal(expected, element.Patterns.ExpandCollapse.Pattern.ExpandCollapseState.Value);
+    }
+
+    /// <summary>
+    /// The page must not scroll. The only allowed exception is a screen too small for the
+    /// content, where the window has already grown to the full work-area height.
+    /// </summary>
+    private static void AssertFitsWithoutScrolling(Window window, string state)
+    {
+        var handle = window.Properties.NativeWindowHandle.Value;
+        Assert.True(GetWindowRect(handle, out var rect));
+        var monitorInfo = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        Assert.True(GetMonitorInfo(MonitorFromWindow(handle, MonitorDefaultToNearest), ref monitorInfo));
+        var work = monitorInfo.WorkArea;
+
+        Assert.True(rect.Top >= work.Top && rect.Bottom <= work.Bottom, $"[{state}] window must stay inside the work area.");
+
+        var scroll = FindRequired(window, "MainContentScrollViewer").Patterns.Scroll.Pattern;
+        if (scroll.VerticallyScrollable.Value)
+        {
+            var windowHeight = rect.Bottom - rect.Top;
+            var workHeight = work.Bottom - work.Top;
+            Assert.True(
+                windowHeight >= workHeight - 2,
+                $"[{state}] MainContentScrollViewer scrolls although the window ({windowHeight}px) is shorter than the work area ({workHeight}px).");
+        }
     }
 
     private static AutomationElement FindRequired(Window window, string automationId)
@@ -159,12 +194,15 @@ public sealed class FlaUiMainWindowTests
         throw new DirectoryNotFoundException("Could not locate FeatherScribe repository root.");
     }
 
-    private static void ResizeWindow(Window window, int width, int height)
+    private static void ResizeWindowWidth(Window window, int width)
     {
         var handle = Process.GetProcessById(window.Properties.ProcessId.Value).MainWindowHandle;
         Assert.NotEqual(IntPtr.Zero, handle);
-        Assert.True(SetWindowPos(handle, IntPtr.Zero, 0, 0, width, height, SetWindowPositionFlags.NoZOrder | SetWindowPositionFlags.NoMove));
+        Assert.True(GetWindowRect(handle, out var rect));
+        Assert.True(SetWindowPos(handle, IntPtr.Zero, 0, 0, width, rect.Bottom - rect.Top, SetWindowPositionFlags.NoZOrder | SetWindowPositionFlags.NoMove));
     }
+
+    private const uint MonitorDefaultToNearest = 2;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(
@@ -176,10 +214,37 @@ public sealed class FlaUiMainWindowTests
         int cy,
         SetWindowPositionFlags uFlags);
 
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
     [Flags]
     private enum SetWindowPositionFlags : uint
     {
         NoMove = 0x0002,
         NoZOrder = 0x0004,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect WorkArea;
+        public uint Flags;
     }
 }

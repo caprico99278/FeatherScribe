@@ -8,12 +8,16 @@ namespace FeatherScribe.App;
 /// </summary>
 public sealed class TrayIconService : IDisposable
 {
+    private const string IconResourceUri = "pack://application:,,,/Assets/Icons/FeatherScribe.ico";
+
     private readonly WinForms.NotifyIcon _notifyIcon;
+    private readonly System.Drawing.Icon _trayIcon;
     private readonly MainWindow _mainWindow;
 
     public TrayIconService(MainWindow mainWindow)
     {
         _mainWindow = mainWindow;
+        _trayIcon = LoadTrayIcon();
 
         var menu = new WinForms.ContextMenuStrip();
         menu.Items.Add("画面を表示", null, (_, _) => ShowMainWindow());
@@ -25,7 +29,7 @@ public sealed class TrayIconService : IDisposable
 
         _notifyIcon = new WinForms.NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = _trayIcon,
             Text = "FeatherScribe - ローカル音声入力",
             Visible = true,
             ContextMenuStrip = menu,
@@ -64,8 +68,19 @@ public sealed class TrayIconService : IDisposable
         }
     }
 
+    private static System.Drawing.Icon LoadTrayIcon()
+    {
+        var resource = Application.GetResourceStream(new Uri(IconResourceUri, UriKind.Absolute))
+            ?? throw new InvalidOperationException($"Icon resource not found: {IconResourceUri}");
+
+        // Icon copies the stream contents, so the resource stream can be closed right away.
+        using var stream = resource.Stream;
+        return new System.Drawing.Icon(stream, WinForms.SystemInformation.SmallIconSize);
+    }
+
     public void Dispose()
     {
         _notifyIcon.Dispose();
+        _trayIcon.Dispose();
     }
 }

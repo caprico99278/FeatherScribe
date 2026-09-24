@@ -139,6 +139,8 @@ Main window target:
 | OverlayRadius | 999 | Recording overlay pill. |
 | PillRadius | 999 | Status pill, small semantic badges. |
 
+`OverlayRadius` and `PillRadius` are caps, not literal radii. WPF `Border` turns a radius larger than the element into an ellipse, so pill styles apply half of the element height through `PillCornerRadiusConverter`, limited by the token.
+
 Avoid highly rounded large cards. Large surfaces should feel refined, not toy-like.
 
 ## 9. Borders and Shadows
@@ -409,6 +411,14 @@ State and empty-state behavior:
 - The rejected-candidate empty state is XAML-only and appears only while `RejectedResultText.Text` is empty.
 - Hotkey registration output remains owned by `HotkeyHelpText` and is moved into the operation guide rather than removed.
 
+Window height:
+
+- The page must not scroll at startup or when either expander opens. `MainWindow` uses `SizeToContent="Height"` (width 800, minimum 720 x 480) instead of a fixed height.
+- Opening or closing `CandidateExpander` or `OperationGuideExpander` refits the height to the content. A manual resize turns `SizeToContent` off, so it is re-enabled on every expander change; the user's width is kept.
+- `MaxHeight` is the work-area height of the window's current monitor, and the window is moved up when its bottom would leave the work area.
+- `LastResultText` (max 240) and `RejectedResultText` (max 160) have bounded heights; longer text scrolls inside the text box instead of growing the window.
+- `MainContentScrollViewer` stays as a fallback and scrolls only when the content is taller than the work area (small screens or high display scale).
+
 Deferred items:
 
 - DPI and hover/focus visual QA require GUI verification.
@@ -529,4 +539,26 @@ Verification status:
 - Static XAML contract tests cover resource keys, button press motion, expander motion, storyboard target name-scope resolution for every `ControlTemplate`, MainWindow motion hooks, RecordingOverlay shell-entrance conditions, and the single shell-motion owner with its superseded-completion guard.
 - The FlaUI MainWindow contract test lives in the separate `src/FeatherScribe.GuiTests` project and is run explicitly with `dotnet test src/FeatherScribe.GuiTests/FeatherScribe.GuiTests.csproj`. It expands both expanders and scrolls at 720x480. When no Windows GUI is available, the GUI test run is recorded as `ENV_GUI_UNAVAILABLE` in the not-run ledger instead of being skipped by the test itself. The `FlaUI.Core` and `FlaUI.UIA3` test-only dependencies were approved as an exception for Phase UI-4 and are referenced only by the GUI test project.
 - Runtime motion values were sampled frame by frame against the real theme resources: expander chevron and content motion, button press/release and rapid press bursts (no residual scale, neighbors do not move), rapid `UiMotion` status updates, overlay Recording→Transcribing→Formatting→Completed without a shell fade, overlay hide interruption and recovery, the overlay not taking the foreground window, and no clocks remaining after hide.
-- Not run (`ENV_GUI_UNAVAILABLE`): perceived smoothness and flicker by eye, physical mouse/keyboard input, click-through with real pointer input, and DPI at 100%, 125%, and 150%.
+- Real-screen verification (screen capture plus real OS mouse/keyboard input, at 225% display scale) confirmed:
+  - MainWindow at 720x480: both expanders open and scroll to the end; no text clipping or overlap.
+  - Button hover, mouse press (0.98 then back to 1.0), disabled button not scaling on click, keyboard focus ring, and Space key press with no residual scale after rapid presses. Neighboring buttons do not move.
+  - RecordingOverlay in every state (Recording, Transcribing, Formatting, Pasting, raw pasted with background formatting, formatting completed, fallback, warning, failed).
+  - Overlay entrance frames, no shell fade across visible state transitions, recovery when hide is interrupted by a new recording, and auto-hide after Completed (about 1.2 s).
+  - While the overlay is shown, the foreground window and keyboard focus stay in the target window, real typing reaches it, and a real click on the overlay passes through to the window beneath.
+- Not run: DPI at 100%, 125%, and 150% (requires changing the Windows display scale; only 225% was available), and subjective smoothness judged by a human eye.
+- Findings from the real-screen verification, fixed in Phase UI-4:
+  - The overlay and the MainWindow badges rendered as ellipses instead of pills, because WPF `Border` scales an oversized radius (999) proportionally in both directions. `OverlayShellStyle`, `StatusPillStyle`, and `SubtleBadgeStyle` now bind `CornerRadius` to half of `ActualHeight` through `PillCornerRadiusConverter`, capped by `OverlayCornerRadius` or `PillCornerRadius`.
+  - `LastResultText` and `RejectedResultText` showed no visible indicator when they received keyboard focus. `ReadOnlyTextBoxStyle` now uses the shared `KeyboardFocusVisualStyle` focus ring.
+
+## 21. App Icon / Visual Identity
+
+FeatherScribe uses design option B as its official app icon.
+
+- Meaning: a light feather (lightweight, quiet writing) above a thin flowing stroke that ends in a dot, expressing speech turning into written text.
+- Colors: a dark navy rounded square (about `#143052` at the top to `#031222` at the bottom, with a subtle blue rim), and a feather that shades from white to cyan in the `#7FD8D2` accent family. The stroke is bright cyan. Glow stays subtle.
+- One identity everywhere: the exe (`ApplicationIcon`), the MainWindow title bar, the taskbar, Alt+Tab, and the notification area all use the same `Assets/Icons/FeatherScribe.ico`. There is no separate tray icon, no state-specific icon, and no light/dark variant.
+- Assets: `src/FeatherScribe.App/Assets/Icons/FeatherScribe-512.png` is the 512x512 master. `FeatherScribe.ico` contains 16, 20, 24, 32, 48, 64, 128, and 256 px frames (32-bit BMP up to 64 px, PNG for 128 and 256 px).
+- Small sizes (16 to 32 px) may simplify detail: the motif is drawn about 12% larger, the translucent glow is dropped, the feather silhouette is slightly thickened, and the rim is thinner and dimmer, so the feather stays recognizable. The shape and colors must not change into a different logo.
+- The design board is a reference only. Production assets contain only the icon: no titles, captions, or mockups.
+- A favicon and web icon sets are out of scope for now.
+- The app icon is the only place that uses a literal feather. Section 4's guidance against literal feather illustrations still applies to the in-app UI.
