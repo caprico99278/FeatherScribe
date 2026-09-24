@@ -39,3 +39,6 @@ samples/formatted/*
 .idea/
 .agents/
 .claude/
+
+# Working instructions (local only)
+doc/work/
