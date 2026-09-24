@@ -14,6 +14,15 @@ internal static class UiMotion
     private const string MotionSubtleOffsetKey = "MotionSubtleOffset";
     private const string MotionMutedOpacityKey = "MotionMutedOpacity";
 
+    // Presentation-only token: bumped on every Stop so a superseded animation's
+    // Completed handler never clears or resets the clocks of a newer one.
+    private static readonly DependencyProperty MotionVersionProperty =
+        DependencyProperty.RegisterAttached(
+            "MotionVersion",
+            typeof(int),
+            typeof(UiMotion),
+            new PropertyMetadata(0));
+
     public static void Reveal(FrameworkElement element)
     {
         RunReveal(
@@ -43,6 +52,7 @@ internal static class UiMotion
 
     public static void Stop(FrameworkElement element)
     {
+        element.SetValue(MotionVersionProperty, (int)element.GetValue(MotionVersionProperty) + 1);
         element.BeginAnimation(UIElement.OpacityProperty, null);
         if (TryGetTranslateTransform(element.RenderTransform, out var translate))
         {
@@ -65,6 +75,7 @@ internal static class UiMotion
         var easing = element.TryFindResource(MotionEaseOutKey) as IEasingFunction;
 
         Stop(element);
+        var version = (int)element.GetValue(MotionVersionProperty);
         element.Opacity = fromOpacity;
         translate.Y = offset;
 
@@ -79,11 +90,21 @@ internal static class UiMotion
 
         opacity.Completed += (_, _) =>
         {
+            if ((int)element.GetValue(MotionVersionProperty) != version)
+            {
+                return;
+            }
+
             element.Opacity = 1;
             element.BeginAnimation(UIElement.OpacityProperty, null);
         };
         slide.Completed += (_, _) =>
         {
+            if ((int)element.GetValue(MotionVersionProperty) != version)
+            {
+                return;
+            }
+
             translate.Y = 0;
             translate.BeginAnimation(TranslateTransform.YProperty, null);
         };

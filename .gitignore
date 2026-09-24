@@ -41,4 +41,4 @@ samples/formatted/*
 .claude/
 
 # Working instructions (local only)
-doc/work/
+docs/work/

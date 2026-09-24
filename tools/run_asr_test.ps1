@@ -1,6 +1,8 @@
-# Phase 0 ASR 検証スクリプト
-# samples/audio/sample_001.wav を whisper.cpp で文字起こしし samples/raw へ保存する。
-# 使い方: powershell -ExecutionPolicy Bypass -File tools/run_asr_test.ps1 [-InputWav path] [-ModelSize small]
+# Phase 0 ASR check script.
+# Transcribes samples/audio/sample_001.wav with whisper.cpp and saves the text to samples/raw.
+# Usage: powershell -ExecutionPolicy Bypass -File tools/run_asr_test.ps1 [-InputWav path] [-ModelSize small]
+#
+# Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as the ANSI code page.
 
 param(
     [string]$InputWav = "",
@@ -20,7 +22,7 @@ $outBase = Join-Path $outDir ($baseName + "_raw")
 
 foreach ($required in @($whisperCli, $modelPath, $InputWav)) {
     if (-not (Test-Path $required)) {
-        Write-Error "Not found: $required (tools/setup_whisper.ps1 を先に実行してください)"
+        Write-Error "Not found: $required (run tools/setup_whisper.ps1 first)"
         exit 1
     }
 }

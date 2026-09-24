@@ -299,12 +299,31 @@
                                             <Trigger Property="IsMouseOver" Value="True">
                                                 <Setter TargetName="HeaderBorder" Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
                                             </Trigger>
+                                            <!-- ChevronRotate lives in this nested template's name scope,
+                                                 so its storyboards must be owned here, not by the Expander template. -->
                                             <Trigger Property="IsChecked" Value="True">
-                                                <Setter TargetName="Chevron" Property="RenderTransform">
-                                                    <Setter.Value>
-                                                        <RotateTransform Angle="0" />
-                                                    </Setter.Value>
-                                                </Setter>
+                                                <Trigger.EnterActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetName="ChevronRotate"
+                                                                             Storyboard.TargetProperty="Angle"
+                                                                             To="0"
+                                                                             Duration="{StaticResource MotionNormalDuration}"
+                                                                             EasingFunction="{StaticResource MotionEaseOut}" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </Trigger.EnterActions>
+                                                <Trigger.ExitActions>
+                                                    <BeginStoryboard>
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetName="ChevronRotate"
+                                                                             Storyboard.TargetProperty="Angle"
+                                                                             To="-90"
+                                                                             Duration="{StaticResource MotionNormalDuration}"
+                                                                             EasingFunction="{StaticResource MotionEaseInOut}" />
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </Trigger.ExitActions>
                                                 <Setter TargetName="HeaderBorder" Property="Background" Value="{StaticResource SurfaceElevatedBrush}" />
                                             </Trigger>
                                         </ControlTemplate.Triggers>
@@ -327,11 +346,6 @@
                             <Trigger.EnterActions>
                                 <BeginStoryboard>
                                     <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="ChevronRotate"
-                                                         Storyboard.TargetProperty="Angle"
-                                                         To="0"
-                                                         Duration="{StaticResource MotionNormalDuration}"
-                                                         EasingFunction="{StaticResource MotionEaseOut}" />
                                         <DoubleAnimation Storyboard.TargetName="ExpandSite"
                                                          Storyboard.TargetProperty="Opacity"
                                                          From="0"
@@ -347,17 +361,6 @@
                                     </Storyboard>
                                 </BeginStoryboard>
                             </Trigger.EnterActions>
-                            <Trigger.ExitActions>
-                                <BeginStoryboard>
-                                    <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetName="ChevronRotate"
-                                                         Storyboard.TargetProperty="Angle"
-                                                         To="-90"
-                                                         Duration="{StaticResource MotionNormalDuration}"
-                                                         EasingFunction="{StaticResource MotionEaseInOut}" />
-                                    </Storyboard>
-                                </BeginStoryboard>
-                            </Trigger.ExitActions>
                             <Setter TargetName="ExpandSite" Property="Visibility" Value="Visible" />
                             <Setter TargetName="ExpandSite" Property="Opacity" Value="1" />
                         </Trigger>

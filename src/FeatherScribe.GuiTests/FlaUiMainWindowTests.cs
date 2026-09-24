@@ -6,21 +6,15 @@ using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
 using FlaUI.UIA3;
 
-namespace FeatherScribe.Tests;
+namespace FeatherScribe.GuiTests;
 
 public sealed class FlaUiMainWindowTests
 {
-    private const string RunGuiTestsEnvironmentVariable = "FEATHERSCRIBE_RUN_GUI_TESTS";
     private const double NoScroll = -1;
 
     [Fact]
     public void MainWindow_FlaUiContract_CanExpandBothSectionsAndScrollAt720By480()
     {
-        if (!ShouldRunGuiTests())
-        {
-            return;
-        }
-
         var appPath = FindAppExecutable();
         using var app = Application.Launch(appPath);
         using var automation = new UIA3Automation();
@@ -66,12 +60,6 @@ public sealed class FlaUiMainWindowTests
             }
         }
     }
-
-    private static bool ShouldRunGuiTests()
-        => string.Equals(
-            Environment.GetEnvironmentVariable(RunGuiTestsEnvironmentVariable),
-            "1",
-            StringComparison.Ordinal);
 
     private static void AssertRequiredControlsBeforeExpansion(Window window)
     {

@@ -1,6 +1,8 @@
-# whisper.cpp セットアップスクリプト
-# 公式リリースの Windows x64 バイナリと ggml モデルを local/ 配下へ配置する。
-# 使い方: powershell -ExecutionPolicy Bypass -File tools/setup_whisper.ps1 [-ModelSize small]
+# whisper.cpp setup script.
+# Places the official Windows x64 release binaries and a ggml model under local/.
+# Usage: powershell -ExecutionPolicy Bypass -File tools/setup_whisper.ps1 [-ModelSize small]
+#
+# Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as the ANSI code page.
 
 param(
     [ValidateSet("tiny", "base", "small", "medium", "large-v3")]
@@ -16,7 +18,7 @@ $modelsDir = Join-Path $localDir "models"
 
 New-Item -ItemType Directory -Force -Path $whisperDir, $modelsDir | Out-Null
 
-# 1. whisper.cpp バイナリ
+# 1. whisper.cpp binaries
 $zipPath = Join-Path $localDir "whisper-bin-x64.zip"
 $zipUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/$WhisperVersion/whisper-bin-x64.zip"
 if (-not (Test-Path (Join-Path $whisperDir "Release/whisper-cli.exe"))) {
@@ -27,7 +29,7 @@ if (-not (Test-Path (Join-Path $whisperDir "Release/whisper-cli.exe"))) {
     Write-Host "whisper-cli.exe already exists. Skipping download."
 }
 
-# 2. ggml モデル (Hugging Face: ggerganov/whisper.cpp)
+# 2. ggml model (Hugging Face: ggerganov/whisper.cpp)
 $modelPath = Join-Path $modelsDir "ggml-$ModelSize.bin"
 $modelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-$ModelSize.bin"
 if (-not (Test-Path $modelPath)) {
@@ -41,4 +43,4 @@ Write-Host ""
 Write-Host "Setup complete."
 Write-Host "  whisper-cli : $whisperDir\Release\whisper-cli.exe"
 Write-Host "  model       : $modelPath"
-Write-Host "config/appsettings.json の asr.whisperExecutablePath / asr.modelPath を確認してください。"
+Write-Host "Check asr.whisperExecutablePath and asr.modelPath in config/appsettings.json."

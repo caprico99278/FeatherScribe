@@ -9,6 +9,7 @@ trim_trailing_whitespace = true
 [*.md]
 trim_trailing_whitespace = false
 
+# Keep .ps1 files ASCII-only: Windows PowerShell 5.1 reads BOM-less files as the ANSI code page.
 [*.ps1]
 charset = utf-8
 end_of_line = lf

@@ -22,6 +22,10 @@ public partial class RecordingOverlay : Window
     private DateTimeOffset _recordingStartedAt;
     private OverlayVisualState _currentState = OverlayVisualState.Hidden;
 
+    // Incremented whenever shell motion is started or stopped, so a superseded
+    // animation's Completed handler can never hide or reset a newer presentation.
+    private int _shellMotionVersion;
+
     public RecordingOverlay()
     {
         InitializeComponent();
@@ -50,7 +54,7 @@ public partial class RecordingOverlay : Window
 
         var wasVisible = IsVisible;
         StopAutoHideTimer();
-        StopHideAnimation();
+        StopShellAnimation();
         StopStateAnimations();
 
         OverlayText.Text = presentation.Text;
@@ -112,7 +116,7 @@ public partial class RecordingOverlay : Window
         StopAutoHideTimer();
         StopRecordingTimer();
         StopStateAnimations();
-        StopHideAnimation();
+        StopShellAnimation();
         base.OnClosed(e);
     }
 
@@ -154,15 +158,20 @@ public partial class RecordingOverlay : Window
         StopRecordingTimer();
     }
 
+    // Shell motion (OverlayRoot opacity, OverlayTranslate.Y, OverlayScale) has a single owner:
+    // AnimateShell starts it, StopShellAnimation freezes it. Entrance, visible-state recovery and
+    // hide all go through these two methods so the same properties are never animated twice.
+
+    /// <summary>Entrance: only called when the overlay was not visible.</summary>
     private void StartShowAnimation()
     {
-        var duration = GetDuration("MotionNormalDuration", TimeSpan.FromMilliseconds(180));
-        var easing = TryFindResource("MotionEaseOut") as IEasingFunction;
-
-        OverlayRoot.BeginAnimation(OpacityProperty, new DoubleAnimation(1, duration) { EasingFunction = easing });
-        OverlayTranslate.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, duration) { EasingFunction = easing });
-        OverlayScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1, duration) { EasingFunction = easing });
-        OverlayScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1, duration) { EasingFunction = easing });
+        AnimateShell(
+            opacity: 1,
+            translateY: 0,
+            scale: 1,
+            GetDuration("MotionNormalDuration", TimeSpan.FromMilliseconds(180)),
+            TryFindResource("MotionEaseOut") as IEasingFunction,
+            onCompleted: null);
     }
 
     private void PrepareShellForEntrance()
@@ -173,39 +182,103 @@ public partial class RecordingOverlay : Window
         OverlayScale.ScaleY = 0.97;
     }
 
+    /// <summary>
+    /// Visible state update. A fully visible shell is left untouched (no re-entrance);
+    /// a shell caught mid-hide continues from its current values back to visible.
+    /// </summary>
     private void RestoreShellToVisibleState()
     {
-        OverlayRoot.Opacity = 1;
-        OverlayTranslate.Y = 0;
-        OverlayScale.ScaleX = 1;
-        OverlayScale.ScaleY = 1;
+        if (IsShellAtRest())
+        {
+            return;
+        }
+
+        AnimateShell(
+            opacity: 1,
+            translateY: 0,
+            scale: 1,
+            GetDuration("MotionFastDuration", TimeSpan.FromMilliseconds(100)),
+            TryFindResource("MotionEaseOut") as IEasingFunction,
+            onCompleted: null);
     }
 
     private void StartHideAnimation()
     {
-        var duration = GetDuration("MotionNormalDuration", TimeSpan.FromMilliseconds(180));
-        var easing = TryFindResource("MotionEaseInOut") as IEasingFunction;
-        var opacity = new DoubleAnimation(0, duration) { EasingFunction = easing };
-        opacity.Completed += (_, _) =>
-        {
-            if (_currentState == OverlayVisualState.Hidden)
+        AnimateShell(
+            opacity: 0,
+            translateY: GetDouble("MotionRevealOffset", 6),
+            scale: OverlayScale.ScaleX,
+            GetDuration("MotionNormalDuration", TimeSpan.FromMilliseconds(180)),
+            TryFindResource("MotionEaseInOut") as IEasingFunction,
+            onCompleted: () =>
             {
-                Hide();
-                StopHideAnimation();
-            }
-        };
-
-        OverlayRoot.BeginAnimation(OpacityProperty, opacity);
-        OverlayTranslate.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(6, duration) { EasingFunction = easing });
+                if (_currentState == OverlayVisualState.Hidden)
+                {
+                    Hide();
+                }
+            });
     }
 
-    private void StopHideAnimation()
+    private void AnimateShell(
+        double opacity,
+        double translateY,
+        double scale,
+        Duration duration,
+        IEasingFunction? easing,
+        Action? onCompleted)
+    {
+        var version = ++_shellMotionVersion;
+
+        // No From values: each animation continues from the currently displayed value.
+        var opacityAnimation = new DoubleAnimation(opacity, duration) { EasingFunction = easing };
+        opacityAnimation.Completed += (_, _) =>
+        {
+            if (version != _shellMotionVersion)
+            {
+                return;
+            }
+
+            SetShellValuesWithoutClocks(opacity, translateY, scale, scale);
+            onCompleted?.Invoke();
+        };
+
+        OverlayRoot.BeginAnimation(OpacityProperty, opacityAnimation);
+        OverlayTranslate.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(translateY, duration) { EasingFunction = easing });
+        OverlayScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(scale, duration) { EasingFunction = easing });
+        OverlayScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(scale, duration) { EasingFunction = easing });
+    }
+
+    /// <summary>Cancels any shell motion (including hide) and freezes the shell at its displayed values.</summary>
+    private void StopShellAnimation()
+    {
+        _shellMotionVersion++;
+        SetShellValuesWithoutClocks(
+            OverlayRoot.Opacity,
+            OverlayTranslate.Y,
+            OverlayScale.ScaleX,
+            OverlayScale.ScaleY);
+    }
+
+    private void SetShellValuesWithoutClocks(double opacity, double translateY, double scaleX, double scaleY)
     {
         OverlayRoot.BeginAnimation(OpacityProperty, null);
         OverlayTranslate.BeginAnimation(TranslateTransform.YProperty, null);
         OverlayScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
         OverlayScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        OverlayRoot.Opacity = opacity;
+        OverlayTranslate.Y = translateY;
+        OverlayScale.ScaleX = scaleX;
+        OverlayScale.ScaleY = scaleY;
     }
+
+    private bool IsShellAtRest()
+        => IsClose(OverlayRoot.Opacity, 1)
+            && IsClose(OverlayTranslate.Y, 0)
+            && IsClose(OverlayScale.ScaleX, 1)
+            && IsClose(OverlayScale.ScaleY, 1);
+
+    private static bool IsClose(double actual, double expected)
+        => Math.Abs(actual - expected) < 0.001;
 
     private void StartStateAnimation(OverlayVisualState state)
     {

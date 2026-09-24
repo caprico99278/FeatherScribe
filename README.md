@@ -194,7 +194,18 @@ dotnet run --project src/FeatherScribe.App
 dotnet build FeatherScribe.slnx
 dotnet test FeatherScribe.slnx --filter "Category!=Integration"   # ユニットテスト
 dotnet test FeatherScribe.slnx --filter "Category=Integration"    # whisper/Ollama疎通 (ローカルスタック必須)
+dotnet test src/FeatherScribe.GuiTests/FeatherScribe.GuiTests.csproj   # GUIテスト (FlaUI、Windows GUI環境必須)
 ```
+
+GUIテストは実際に FeatherScribe を起動して操作するため、ソリューション (`FeatherScribe.slnx`) には含めず、上記のように明示的に実行します。
+
+### ソースアーカイブ
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/archive_featherscribe.ps1
+```
+
+出力先は既定で環境変数 `FEATHERSCRIBE_ARCHIVE_OUTPUT_DIR`（未設定時はリポジトリと同じ階層の `OutputPath\FeatherScribe` フォルダ）です。`-OutputDirectory` で明示的に指定することもできます。出力先フォルダ内の既存ファイルは作成前に削除されるため、アーカイブ専用のフォルダを指定してください。
 
 ## Local LLM model benchmark
 

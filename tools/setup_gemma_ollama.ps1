@@ -1,9 +1,12 @@
-# Gemma 4 + Ollama セットアップスクリプト
-# Ollama が未導入なら公式 zip を local/ollama へ展開し、Gemma 4 モデルを pull する。
-# 使い方: powershell -ExecutionPolicy Bypass -File tools/setup_gemma_ollama.ps1 [-ModelTag gemma4:e4b]
+# Gemma 4 + Ollama setup script.
+# Extracts the official Ollama zip to local/ollama when Ollama is not installed,
+# then pulls the Gemma 4 model.
+# Usage: powershell -ExecutionPolicy Bypass -File tools/setup_gemma_ollama.ps1 [-ModelTag gemma4:e4b]
+#
+# Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as the ANSI code page.
 
 param(
-    [string]$ModelTag = "gemma4:e2b",  # 既定は軽量モデル。高品質モード用は gemma4:e4b を追加でpull
+    [string]$ModelTag = "gemma4:e2b",  # Lightweight default. Pull gemma4:e4b additionally for the quality mode.
     [string]$OllamaVersion = "v0.31.1"
 )
 
@@ -12,7 +15,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $localDir = Join-Path $repoRoot "local"
 $ollamaDir = Join-Path $localDir "ollama"
 
-# 1. ollama.exe の場所を決める (PATH 上 > local/ollama > ダウンロード)
+# 1. Resolve ollama.exe (PATH > local/ollama > download)
 $ollamaExe = (Get-Command ollama -ErrorAction SilentlyContinue).Source
 if (-not $ollamaExe) {
     $ollamaExe = Join-Path $ollamaDir "ollama.exe"
@@ -27,7 +30,7 @@ if (-not $ollamaExe) {
 }
 Write-Host "Using ollama: $ollamaExe"
 
-# 2. サーバーが起動していなければ起動
+# 2. Start the server when it is not running
 try {
     Invoke-RestMethod -Uri "http://localhost:11434/api/version" -TimeoutSec 3 | Out-Null
     Write-Host "Ollama server is already running."
@@ -37,10 +40,10 @@ try {
     Start-Sleep -Seconds 5
 }
 
-# 3. Gemma 4 モデルの pull (e4b は約 9.6GB)
+# 3. Pull the Gemma 4 model (e4b is approx. 9.6GB)
 Write-Host "Pulling $ModelTag ..."
 & $ollamaExe pull $ModelTag
 
 Write-Host ""
 Write-Host "Setup complete. Model: $ModelTag"
-Write-Host "config/appsettings.json の llm.model と一致しているか確認してください。"
+Write-Host "Check that llm.model in config/appsettings.json matches this model."

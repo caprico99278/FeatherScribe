@@ -446,6 +446,46 @@ public sealed class ThemeResourceTests
             element => element.Name.LocalName == "DoubleAnimation"
                 && element.Attribute("Storyboard.TargetName")?.Value == "ExpandSiteTranslate"
                 && element.Attribute("Storyboard.TargetProperty")?.Value == "Y");
+
+        // The chevron must keep its named RotateTransform while expanded; replacing
+        // RenderTransform with a static transform hides the rotation motion.
+        Assert.DoesNotContain(
+            expanderStyle.Descendants(),
+            element => element.Name.LocalName == "Setter"
+                && element.Attribute("TargetName")?.Value == "Chevron"
+                && element.Attribute("Property")?.Value == "RenderTransform");
+    }
+
+    [Fact]
+    public void Controls_StoryboardTargetsResolveWithinOwningTemplateNameScope()
+    {
+        // A template trigger can only resolve Storyboard.TargetName in its own template's
+        // name scope. Names inside a nested template are unreachable and throw at runtime.
+        var document = LoadControlsXaml();
+        var templates = document
+            .Descendants()
+            .Where(element => element.Name.LocalName == "ControlTemplate")
+            .ToArray();
+
+        Assert.NotEmpty(templates);
+        foreach (var template in templates)
+        {
+            var scopeNames = DescendantsInTemplateScope(template)
+                .Select(element => element.Attribute(XamlNamespace + "Name")?.Value)
+                .Where(name => name is not null)
+                .ToHashSet(StringComparer.Ordinal);
+            var targetNames = DescendantsInTemplateScope(template)
+                .Where(element => element.Name.LocalName == "DoubleAnimation")
+                .Select(element => element.Attribute("Storyboard.TargetName")?.Value)
+                .Where(name => name is not null);
+
+            foreach (var targetName in targetNames)
+            {
+                Assert.True(
+                    scopeNames.Contains(targetName!),
+                    $"Storyboard.TargetName '{targetName}' is not defined in the owning ControlTemplate name scope.");
+            }
+        }
     }
 
     [Fact]
@@ -475,6 +515,27 @@ public sealed class ThemeResourceTests
         Assert.Contains("PrepareShellForEntrance();", code);
         Assert.Contains("RestoreShellToVisibleState();", code);
         Assert.Contains("if (wasVisible)", code);
+    }
+
+    [Fact]
+    public void RecordingOverlay_ShellMotionHasSingleOwnerAndSupersededCompletionGuard()
+    {
+        var code = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "FeatherScribe.App", "RecordingOverlay.xaml.cs"));
+
+        // Visible updates leave a resting shell untouched instead of resetting it to Opacity 0.
+        Assert.Contains("if (IsShellAtRest())", code);
+        // Showing a new presentation first freezes any in-flight shell motion, including hide.
+        Assert.Contains("StopShellAnimation();", code);
+        // A superseded animation's completion must not hide or reset a newer presentation.
+        Assert.Contains("if (version != _shellMotionVersion)", code);
+        // State-specific loop animations are stoppable.
+        Assert.Contains("private void StopStateAnimations()", code);
+        Assert.Contains("RepeatBehavior.Forever", code);
+
+        var shellAnimationStarts = System.Text.RegularExpressions.Regex.Matches(
+            code,
+            @"OverlayRoot\.BeginAnimation\(OpacityProperty, (?!null)").Count;
+        Assert.Equal(1, shellAnimationStarts);
     }
 
     private static ThemeResourceCatalog LoadThemeResourceCatalog()
@@ -546,6 +607,23 @@ public sealed class ThemeResourceTests
             .Descendants()
             .FirstOrDefault(element => element.Attribute(XamlNamespace + "Key")?.Value == key)
             ?? throw new InvalidOperationException($"Missing resource: {key}");
+    }
+
+    private static IEnumerable<XElement> DescendantsInTemplateScope(XElement template)
+    {
+        foreach (var child in template.Elements())
+        {
+            if (child.Name.LocalName is "ControlTemplate" or "DataTemplate")
+            {
+                continue;
+            }
+
+            yield return child;
+            foreach (var descendant in DescendantsInTemplateScope(child))
+            {
+                yield return descendant;
+            }
+        }
     }
 
     private static XElement? FindDescendantByName(XElement element, string name)

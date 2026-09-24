@@ -1,14 +1,16 @@
-# Phase 0 整形検証スクリプト
-# samples/raw のテキストを Gemma 4 (Ollama /api/chat) で整形し samples/formatted へ保存する。
-# 使い方: powershell -ExecutionPolicy Bypass -File tools/run_format_test.ps1 [-InputTxt path] [-ModelTag gemma4:e4b]
+# Phase 0 formatting check script.
+# Formats text from samples/raw with Gemma 4 (Ollama /api/chat) and saves it to samples/formatted.
+# Usage: powershell -ExecutionPolicy Bypass -File tools/run_format_test.ps1 [-InputTxt path] [-ModelTag gemma4:e4b]
+#
+# Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as the ANSI code page.
 
 param(
     [string]$InputTxt = "",
-    [string]$ModelTag = "gemma4:e2b",  # 高品質検証は gemma4:e4b を指定
+    [string]$ModelTag = "gemma4:e2b",  # Use gemma4:e4b for the quality check.
     [string]$Endpoint = "http://localhost:11434",
     [string]$PromptFile = "prompts/plain.md",
     [double]$Temperature = 0.1,
-    [int]$GpuLayers = 0  # 0=CPUのみ。VRAMが十分な環境では -1 を渡すと自動判定
+    [int]$GpuLayers = 0  # 0 = CPU only. Pass -1 to let Ollama decide when VRAM is sufficient.
 )
 
 $ErrorActionPreference = "Stop"

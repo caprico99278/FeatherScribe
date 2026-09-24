@@ -23,6 +23,8 @@ FeatherScribe本体はproprietaryだが、以下のサードパーティ製ソ�
 | xunit.runner.visualstudio 3.1.4 | Apache-2.0 | テスト |
 | Microsoft.NET.Test.Sdk 17.14.1 | MIT | テスト |
 | coverlet.collector 6.0.4 | MIT | カバレッジ |
+| FlaUI.Core 5.0.0 | MIT | GUIテスト (UI Automation)。Phase UI-4で例外承認済み、FeatherScribe.GuiTests専用 |
+| FlaUI.UIA3 5.0.0 | MIT | GUIテスト (UI Automation)。Phase UI-4で例外承認済み、FeatherScribe.GuiTests専用 |
 
 ## 備考
 

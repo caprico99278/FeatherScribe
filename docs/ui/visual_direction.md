@@ -491,16 +491,20 @@ Implemented motion:
 - Result updates: `LastResultText.Text` updates immediately, then receives a short reveal motion.
 - Rejected candidate updates: `RejectedResultText.Text` updates immediately when a candidate is available, then receives a short reveal motion. The expander is not opened automatically.
 - Button press: buttons using `BaseButtonStyle` or derived templates scale with `RenderTransform` only, using `MotionPressScale` and `MotionFastDuration`.
-- Expander: `SectionExpanderStyle` rotates the chevron from -90 degrees to 0 degrees and reveals content with opacity plus a small translate motion.
-- RecordingOverlay shell entrance: the shell entrance runs only when the overlay is shown from a non-visible state.
-- RecordingOverlay state update: state changes while visible update text, color, glyph, elapsed timer, and state-specific indicator motion without fading the whole shell out and in.
-- RecordingOverlay hide interruption: if a new presentation arrives while hide is in progress, hide animation is stopped and the shell returns to the visible state before applying the new presentation.
+- Expander: `SectionExpanderStyle` rotates the chevron (`ChevronRotate`) from -90 degrees to 0 degrees and reveals content (`ExpandSite`, `ExpandSiteTranslate`) with opacity plus a small translate motion. Layout expand/collapse itself is immediate.
+  - The chevron storyboards are owned by the `HeaderSite` ToggleButton template (`IsChecked` trigger), because `ChevronRotate` lives in that nested template's name scope. The Expander template's `IsExpanded` trigger owns only the content motion. A storyboard must never target a name from a nested template; that name cannot be resolved and throws at runtime.
+  - The chevron's `RenderTransform` is never replaced by a trigger `Setter`; the named `ChevronRotate` stays in place so the rotation is visible.
+- RecordingOverlay shell entrance: the shell entrance (Opacity 0→1, TranslateY `MotionRevealOffset`→0, Scale 0.97→1, `MotionNormalDuration`) runs only when the overlay is shown from a non-visible state.
+- RecordingOverlay state update: state changes while visible update text, color, glyph, elapsed timer, and state-specific indicator motion. A shell already at rest (Opacity 1, TranslateY 0, Scale 1) is left untouched, so the whole shell never fades out and in between Recording, Transcribing, Formatting, and Completed.
+- RecordingOverlay hide interruption: if a new presentation arrives while hide is in progress, the hide motion is frozen at the currently displayed values, the window is not hidden, and the shell continues from those values back to the visible state with `MotionFastDuration`. The new state is displayed immediately.
 
 Animation stop and race policy:
 
 - MainWindow motion never waits before updating text.
-- `UiMotion` stops the previous animation before starting the next one and clears animation clocks after completion.
-- Overlay state-specific loop animations are stopped before starting the next state animation.
+- `UiMotion` stops the previous animation before starting the next one and clears animation clocks after completion. A per-element motion version ensures a superseded animation's completion never clears the clocks of a newer one.
+- RecordingOverlay shell motion (`OverlayRoot` opacity, `OverlayTranslate`, `OverlayScale`) has a single owner: `AnimateShell` starts entrance, recovery, and hide motion; `StopShellAnimation` freezes it. A shell motion version ensures a superseded animation's completion never hides or resets a newer presentation.
+- Overlay state-specific loop animations are stopped before starting the next state animation and when the overlay hides.
+- After hide completes, no shell animation clocks remain.
 - Overlay auto-hide and recording timers remain one timer each.
 - Animation completion is not used as a business-processing completion condition.
 
@@ -512,7 +516,17 @@ Not implemented in this phase:
 - Large page choreography or decorative persistent animation.
 - External animation, icon, or UI libraries.
 
+Deferred to Phase UI-5 and later:
+
+- In-app notifications and a copy-completed toast.
+- Audio-level (volume-linked) animation in RecordingOverlay.
+- Multi-monitor placement optimization for RecordingOverlay.
+- Scrollbar redesign.
+- Settings screen, Motion settings, and a Reduced Motion setting.
+
 Verification status:
 
-- Static XAML contract tests cover resource keys, button press motion, expander motion, MainWindow motion hooks, and RecordingOverlay shell-entrance conditions.
-- Windows GUI verification is still required for perceived smoothness, focus retention, click-through behavior, and DPI behavior.
+- Static XAML contract tests cover resource keys, button press motion, expander motion, storyboard target name-scope resolution for every `ControlTemplate`, MainWindow motion hooks, RecordingOverlay shell-entrance conditions, and the single shell-motion owner with its superseded-completion guard.
+- The FlaUI MainWindow contract test lives in the separate `src/FeatherScribe.GuiTests` project and is run explicitly with `dotnet test src/FeatherScribe.GuiTests/FeatherScribe.GuiTests.csproj`. It expands both expanders and scrolls at 720x480. When no Windows GUI is available, the GUI test run is recorded as `ENV_GUI_UNAVAILABLE` in the not-run ledger instead of being skipped by the test itself. The `FlaUI.Core` and `FlaUI.UIA3` test-only dependencies were approved as an exception for Phase UI-4 and are referenced only by the GUI test project.
+- Runtime motion values were sampled frame by frame against the real theme resources: expander chevron and content motion, button press/release and rapid press bursts (no residual scale, neighbors do not move), rapid `UiMotion` status updates, overlay Recording→Transcribing→Formatting→Completed without a shell fade, overlay hide interruption and recovery, the overlay not taking the foreground window, and no clocks remaining after hide.
+- Not run (`ENV_GUI_UNAVAILABLE`): perceived smoothness and flicker by eye, physical mouse/keyboard input, click-through with real pointer input, and DPI at 100%, 125%, and 150%.
