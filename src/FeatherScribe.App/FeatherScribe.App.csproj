@@ -30,6 +30,12 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyTitle>FeatherScribe</AssemblyTitle>
+    <ApplicationIcon>Assets\Icons\FeatherScribe.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Window and tray icon, loaded via pack://application:,,,/Assets/Icons/FeatherScribe.ico -->
+    <Resource Include="Assets\Icons\FeatherScribe.ico" />
+  </ItemGroup>
 
 </Project>

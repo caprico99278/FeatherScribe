@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Media;
 using FeatherScribe.Core;
 
 namespace FeatherScribe.App;
@@ -20,6 +22,12 @@ public partial class MainWindow : Window
         _controller = controller;
         _output = output;
         Loaded += MainWindow_Loaded;
+        SourceInitialized += (_, _) => FitHeightToContent();
+        SizeChanged += (_, _) => KeepInsideWorkArea();
+        CandidateExpander.Expanded += (_, _) => FitHeightToContent();
+        CandidateExpander.Collapsed += (_, _) => FitHeightToContent();
+        OperationGuideExpander.Expanded += (_, _) => FitHeightToContent();
+        OperationGuideExpander.Collapsed += (_, _) => FitHeightToContent();
 
         var llmState = settings.Llm.Enabled ? "有効" : "無効 (llm.enabled=false / 全モード未整形)";
         HotkeyHelpText.Text =
@@ -230,6 +238,55 @@ public partial class MainWindow : Window
         {
             SetStatus($"手動採用失敗: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Sizes the window height to its content so the page does not scroll, capped by the
+    /// current monitor's work area. A manual resize turns SizeToContent off, so it is
+    /// re-enabled whenever an expander changes the content height (the width is kept).
+    /// The ScrollViewer only scrolls when the content is taller than the work area.
+    /// </summary>
+    private void FitHeightToContent()
+    {
+        if (TryGetWorkArea(out var workArea))
+        {
+            MaxHeight = Math.Max(MinHeight, workArea.Height);
+        }
+
+        SizeToContent = SizeToContent.Height;
+    }
+
+    private void KeepInsideWorkArea()
+    {
+        if (WindowState != WindowState.Normal || !TryGetWorkArea(out var workArea))
+        {
+            return;
+        }
+
+        if (Top + ActualHeight > workArea.Bottom)
+        {
+            Top = Math.Max(workArea.Top, workArea.Bottom - ActualHeight);
+        }
+    }
+
+    private bool TryGetWorkArea(out Rect workArea)
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            workArea = Rect.Empty;
+            return false;
+        }
+
+        // Screen reports physical pixels; convert to this window's DIPs.
+        var area = System.Windows.Forms.Screen.FromHandle(handle).WorkingArea;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        workArea = new Rect(
+            area.Left / dpi.DpiScaleX,
+            area.Top / dpi.DpiScaleY,
+            area.Width / dpi.DpiScaleX,
+            area.Height / dpi.DpiScaleY);
+        return true;
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)

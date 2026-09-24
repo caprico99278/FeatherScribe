@@ -411,6 +411,14 @@ State and empty-state behavior:
 - The rejected-candidate empty state is XAML-only and appears only while `RejectedResultText.Text` is empty.
 - Hotkey registration output remains owned by `HotkeyHelpText` and is moved into the operation guide rather than removed.
 
+Window height:
+
+- The page must not scroll at startup or when either expander opens. `MainWindow` uses `SizeToContent="Height"` (width 800, minimum 720 x 480) instead of a fixed height.
+- Opening or closing `CandidateExpander` or `OperationGuideExpander` refits the height to the content. A manual resize turns `SizeToContent` off, so it is re-enabled on every expander change; the user's width is kept.
+- `MaxHeight` is the work-area height of the window's current monitor, and the window is moved up when its bottom would leave the work area.
+- `LastResultText` (max 240) and `RejectedResultText` (max 160) have bounded heights; longer text scrolls inside the text box instead of growing the window.
+- `MainContentScrollViewer` stays as a fallback and scrolls only when the content is taller than the work area (small screens or high display scale).
+
 Deferred items:
 
 - DPI and hover/focus visual QA require GUI verification.
@@ -541,3 +549,16 @@ Verification status:
 - Findings from the real-screen verification, fixed in Phase UI-4:
   - The overlay and the MainWindow badges rendered as ellipses instead of pills, because WPF `Border` scales an oversized radius (999) proportionally in both directions. `OverlayShellStyle`, `StatusPillStyle`, and `SubtleBadgeStyle` now bind `CornerRadius` to half of `ActualHeight` through `PillCornerRadiusConverter`, capped by `OverlayCornerRadius` or `PillCornerRadius`.
   - `LastResultText` and `RejectedResultText` showed no visible indicator when they received keyboard focus. `ReadOnlyTextBoxStyle` now uses the shared `KeyboardFocusVisualStyle` focus ring.
+
+## 21. App Icon / Visual Identity
+
+FeatherScribe uses design option B as its official app icon.
+
+- Meaning: a light feather (lightweight, quiet writing) above a thin flowing stroke that ends in a dot, expressing speech turning into written text.
+- Colors: a dark navy rounded square (about `#143052` at the top to `#031222` at the bottom, with a subtle blue rim), and a feather that shades from white to cyan in the `#7FD8D2` accent family. The stroke is bright cyan. Glow stays subtle.
+- One identity everywhere: the exe (`ApplicationIcon`), the MainWindow title bar, the taskbar, Alt+Tab, and the notification area all use the same `Assets/Icons/FeatherScribe.ico`. There is no separate tray icon, no state-specific icon, and no light/dark variant.
+- Assets: `src/FeatherScribe.App/Assets/Icons/FeatherScribe-512.png` is the 512x512 master. `FeatherScribe.ico` contains 16, 20, 24, 32, 48, 64, 128, and 256 px frames (32-bit BMP up to 64 px, PNG for 128 and 256 px).
+- Small sizes (16 to 32 px) may simplify detail: the motif is drawn about 12% larger, the translucent glow is dropped, the feather silhouette is slightly thickened, and the rim is thinner and dimmer, so the feather stays recognizable. The shape and colors must not change into a different logo.
+- The design board is a reference only. Production assets contain only the icon: no titles, captions, or mockups.
+- A favicon and web icon sets are out of scope for now.
+- The app icon is the only place that uses a literal feather. Section 4's guidance against literal feather illustrations still applies to the in-app UI.

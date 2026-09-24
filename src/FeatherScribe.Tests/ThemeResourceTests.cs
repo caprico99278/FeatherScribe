@@ -258,7 +258,9 @@ public sealed class ThemeResourceTests
         var window = document.Root ?? throw new InvalidOperationException("MainWindow root element is missing.");
 
         Assert.Equal("800", window.Attribute("Width")?.Value);
-        Assert.Equal("540", window.Attribute("Height")?.Value);
+        // Height follows the content so startup and expanded states do not scroll.
+        Assert.Null(window.Attribute("Height"));
+        Assert.Equal("Height", window.Attribute("SizeToContent")?.Value);
         Assert.Equal("720", window.Attribute("MinWidth")?.Value);
         Assert.Equal("480", window.Attribute("MinHeight")?.Value);
         Assert.Equal("CenterScreen", window.Attribute("WindowStartupLocation")?.Value);
@@ -275,6 +277,32 @@ public sealed class ThemeResourceTests
             rootGrid.Descendants(),
             element => element.Name.LocalName == "TranslateTransform"
                 && element.Attribute("Y")?.Value == "{StaticResource MotionRevealOffset}");
+    }
+
+    [Fact]
+    public void MainWindow_ResultTextBoxesHaveBoundedHeight()
+    {
+        // Long text scrolls inside the text box instead of growing the window without limit.
+        var document = LoadMainWindowXaml();
+
+        Assert.Equal("240", FindElementByName(document, "LastResultText")!.Attribute("MaxHeight")?.Value);
+        Assert.Equal("160", FindElementByName(document, "RejectedResultText")!.Attribute("MaxHeight")?.Value);
+    }
+
+    [Fact]
+    public void MainWindow_RefitsHeightWhenExpandersChangeAndStaysInWorkArea()
+    {
+        var code = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "FeatherScribe.App", "MainWindow.xaml.cs"));
+
+        foreach (var expander in new[] { "CandidateExpander", "OperationGuideExpander" })
+        {
+            Assert.Contains($"{expander}.Expanded += (_, _) => FitHeightToContent();", code);
+            Assert.Contains($"{expander}.Collapsed += (_, _) => FitHeightToContent();", code);
+        }
+
+        Assert.Contains("SizeToContent = SizeToContent.Height;", code);
+        Assert.Contains("MaxHeight = Math.Max(MinHeight, workArea.Height);", code);
+        Assert.Contains("SizeChanged += (_, _) => KeepInsideWorkArea();", code);
     }
 
     [Fact]
