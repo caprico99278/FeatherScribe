@@ -1,10 +1,12 @@
+using System.Diagnostics;
 using System.Windows;
 using WinForms = System.Windows.Forms;
 
 namespace FeatherScribe.App;
 
 /// <summary>
-/// タスクトレイ常駐アイコン。表示/コピー/貼り付け/終了のメニューと通知を提供する。
+/// タスクトレイ常駐アイコン。表示/再整形/コピー/貼り付け/終了のメニューと通知を提供する。
+/// 結果操作は MainWindow の公開エントリ (例外を外へ出さない) をそのまま呼ぶ。
 /// </summary>
 public sealed class TrayIconService : IDisposable
 {
@@ -13,6 +15,9 @@ public sealed class TrayIconService : IDisposable
     private readonly WinForms.NotifyIcon _notifyIcon;
     private readonly System.Drawing.Icon _trayIcon;
     private readonly MainWindow _mainWindow;
+    private readonly WinForms.ToolStripItem _reformatItem;
+    private readonly WinForms.ToolStripItem _copyItem;
+    private readonly WinForms.ToolStripItem _pasteItem;
 
     public TrayIconService(MainWindow mainWindow)
     {
@@ -20,17 +25,18 @@ public sealed class TrayIconService : IDisposable
         _trayIcon = LoadTrayIcon();
 
         var menu = new WinForms.ContextMenuStrip();
-        menu.Items.Add("画面を表示", null, (_, _) => ShowMainWindow());
-        menu.Items.Add("直近rawをもう一度整形", null, (_, _) => _mainWindow.ReformatLast());
-        menu.Items.Add("直近結果をクリップボードにコピー", null, async (_, _) => await SafeAsync(_mainWindow.RecopyAsync));
-        menu.Items.Add("直近結果を直前の入力先へ貼り付け", null, async (_, _) => await SafeAsync(_mainWindow.RepasteAsync));
+        menu.Items.Add(UserFacingText.TrayShowWindow, null, (_, _) => ShowMainWindow());
+        _reformatItem = menu.Items.Add(UserFacingText.TrayReformat, null, (_, _) => _mainWindow.StartReformat());
+        _copyItem = menu.Items.Add(UserFacingText.TrayCopyLatest, null, async (_, _) => await _mainWindow.CopyLatestAsync());
+        _pasteItem = menu.Items.Add(UserFacingText.TrayPasteLatest, null, async (_, _) => await _mainWindow.PasteLatestToPreviousTargetAsync());
         menu.Items.Add(new WinForms.ToolStripSeparator());
-        menu.Items.Add("終了", null, (_, _) => ExitApplication());
+        menu.Items.Add(UserFacingText.TrayExit, null, (_, _) => ExitApplication());
+        menu.Opening += (_, _) => RefreshMenuAvailability();
 
         _notifyIcon = new WinForms.NotifyIcon
         {
             Icon = _trayIcon,
-            Text = "FeatherScribe - ローカル音声入力",
+            Text = UserFacingText.TrayToolTip,
             Visible = true,
             ContextMenuStrip = menu,
         };
@@ -40,6 +46,26 @@ public sealed class TrayIconService : IDisposable
     public void Notify(string title, string message)
     {
         _notifyIcon.ShowBalloonTip(5000, title, message, WinForms.ToolTipIcon.Warning);
+    }
+
+    /// <summary>
+    /// Offers each result action only when it can run now, with the same meaning as the
+    /// MainWindow buttons. 「画面を表示」 and 「終了」 are always enabled.
+    /// </summary>
+    private void RefreshMenuAvailability()
+    {
+        try
+        {
+            var availability = _mainWindow.GetActionAvailability();
+            _reformatItem.Enabled = availability.CanReformat;
+            _copyItem.Enabled = availability.CanCopy;
+            _pasteItem.Enabled = availability.CanRepaste;
+        }
+        catch (Exception ex)
+        {
+            // Opening the menu must never crash the app; the items keep their previous state.
+            Debug.WriteLine($"[TrayIconService] Availability refresh failed: {ex}");
+        }
     }
 
     private void ShowMainWindow()
@@ -54,18 +80,6 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.Visible = false;
         _mainWindow.CloseForExit();
         Application.Current.Shutdown();
-    }
-
-    private static async Task SafeAsync(Func<Task> action)
-    {
-        try
-        {
-            await action();
-        }
-        catch (Exception)
-        {
-            // トレイメニュー操作の失敗でアプリを落とさない
-        }
     }
 
     private static System.Drawing.Icon LoadTrayIcon()

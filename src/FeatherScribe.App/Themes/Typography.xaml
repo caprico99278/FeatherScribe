@@ -59,6 +59,11 @@
         <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
     </Style>
 
+    <!-- Caption text inside SubtleBadgeStyle: MutedText on Selection is below 4.5:1, SecondaryText is not. -->
+    <Style x:Key="BadgeTextStyle" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource CaptionTextStyle}">
+        <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+    </Style>
+
     <Style x:Key="StatusTextStyle" TargetType="{x:Type TextBlock}">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
         <Setter Property="FontSize" Value="13" />

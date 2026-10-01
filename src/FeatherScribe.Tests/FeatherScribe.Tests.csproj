@@ -26,4 +26,12 @@
     <ProjectReference Include="..\FeatherScribe.Infrastructure\FeatherScribe.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Pure ASR benchmark logic (no whisper, no audio) linked from tools/AsrBenchmark. -->
+    <Compile Include="..\..\tools\AsrBenchmark\AsrCorpus.cs" Link="AsrBenchmark\AsrCorpus.cs" />
+    <Compile Include="..\..\tools\AsrBenchmark\AsrMetrics.cs" Link="AsrBenchmark\AsrMetrics.cs" />
+    <Compile Include="..\..\tools\AsrBenchmark\AudioSetMarker.cs" Link="AsrBenchmark\AudioSetMarker.cs" />
+    <Compile Include="..\..\tools\AsrBenchmark\BenchmarkReport.cs" Link="AsrBenchmark\BenchmarkReport.cs" />
+  </ItemGroup>
+
 </Project>

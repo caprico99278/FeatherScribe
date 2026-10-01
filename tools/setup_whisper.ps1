@@ -5,7 +5,7 @@
 # Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as the ANSI code page.
 
 param(
-    [ValidateSet("tiny", "base", "small", "medium", "large-v3")]
+    [ValidateSet("tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "large-v3-turbo-q5_0")]
     [string]$ModelSize = "small",
     [string]$WhisperVersion = "v1.9.1"
 )

@@ -26,6 +26,7 @@ public sealed class ThemeResourceTests
         "PrimaryTextColor",
         "SecondaryTextColor",
         "MutedTextColor",
+        "DisabledTextColor",
         "AccentColor",
         "AccentHoverColor",
         "AccentPressedColor",
@@ -36,6 +37,7 @@ public sealed class ThemeResourceTests
         "OverlayBackgroundColor",
         "SelectionColor",
         "FocusColor",
+        "ShadowColor",
     ];
 
     private static readonly string[] RequiredBrushKeys =
@@ -49,6 +51,7 @@ public sealed class ThemeResourceTests
         "PrimaryTextBrush",
         "SecondaryTextBrush",
         "MutedTextBrush",
+        "DisabledTextBrush",
         "AccentBrush",
         "AccentHoverBrush",
         "AccentPressedBrush",
@@ -86,6 +89,9 @@ public sealed class ThemeResourceTests
         "PillCornerRadius",
         "FocusRingThickness",
         "StandardBorderThickness",
+        "ScrollBarSize",
+        "ScrollBarThumbCornerRadius",
+        "OverlayShadowInset",
     ];
 
     private static readonly string[] RequiredTypographyKeys =
@@ -100,6 +106,7 @@ public sealed class ThemeResourceTests
         "ResultTextStyle",
         "ButtonTextStyle",
         "CaptionTextStyle",
+        "BadgeTextStyle",
         "StatusTextStyle",
         "MonospaceTextStyle",
     ];
@@ -142,6 +149,13 @@ public sealed class ThemeResourceTests
         "OverlayPrimaryTextStyle",
         "OverlayTimerTextStyle",
         "OverlayShadowEffect",
+        "FeedbackShadowEffect",
+        "FeedbackSnackbarStyle",
+        "FeedbackTextStyle",
+        "FeedbackGlyphTextStyle",
+        "DarkScrollBarThumbStyle",
+        "DarkScrollBarPageButtonStyle",
+        "DarkScrollBarStyle",
     ];
 
     private static readonly Regex StaticResourceRegex = new(@"\{StaticResource\s+([^},\s]+)", RegexOptions.Compiled);
@@ -191,6 +205,7 @@ public sealed class ThemeResourceTests
         AssertColor(resources, "PrimaryTextColor", "#E8EEF2");
         AssertColor(resources, "SecondaryTextColor", "#AEBBC5");
         AssertColor(resources, "MutedTextColor", "#74828D");
+        AssertColor(resources, "DisabledTextColor", "#97A3AD");
         AssertColor(resources, "AccentColor", "#7FD8D2");
         AssertColor(resources, "AccentHoverColor", "#95E4DE");
         AssertColor(resources, "AccentPressedColor", "#5DBCB7");
@@ -201,11 +216,15 @@ public sealed class ThemeResourceTests
         AssertColor(resources, "OverlayBackgroundColor", "#D91A222A");
         AssertColor(resources, "SelectionColor", "#28484C");
         AssertColor(resources, "FocusColor", "#9CEBE6");
+        AssertColor(resources, "ShadowColor", "#000000");
     }
 
     [Theory]
     [InlineData("src", "FeatherScribe.App", "MainWindow.xaml")]
     [InlineData("src", "FeatherScribe.App", "RecordingOverlay.xaml")]
+    [InlineData("src", "FeatherScribe.App", "Themes", "Colors.xaml")]
+    [InlineData("src", "FeatherScribe.App", "Themes", "Typography.xaml")]
+    [InlineData("src", "FeatherScribe.App", "Themes", "Controls.xaml")]
     public void ProductionXaml_StaticResourceReferencesExist(params string[] pathParts)
     {
         var resources = LoadThemeResourceCatalog();
@@ -265,7 +284,13 @@ public sealed class ThemeResourceTests
         Assert.Equal("480", window.Attribute("MinHeight")?.Value);
         Assert.Equal("CenterScreen", window.Attribute("WindowStartupLocation")?.Value);
 
-        var scrollViewer = window.Elements().First(element => element.Name.LocalName == "ScrollViewer");
+        // Window.Resources holds only the window-scoped scrollbar style (Phase UI-8); the content root is single.
+        var windowRoot = Assert.Single(window.Elements(), element => element.Name.LocalName != "Window.Resources");
+        Assert.Equal("Grid", windowRoot.Name.LocalName);
+        Assert.Equal("MainWindowRoot", windowRoot.Attribute(XamlNamespace + "Name")?.Value);
+
+        var scrollViewer = windowRoot.Elements().First(element => element.Name.LocalName == "ScrollViewer");
+        Assert.Equal("MainContentScrollViewer", scrollViewer.Attribute(XamlNamespace + "Name")?.Value);
         Assert.Equal("Auto", scrollViewer.Attribute("VerticalScrollBarVisibility")?.Value);
         Assert.Equal("Disabled", scrollViewer.Attribute("HorizontalScrollBarVisibility")?.Value);
 
@@ -277,6 +302,192 @@ public sealed class ThemeResourceTests
             rootGrid.Descendants(),
             element => element.Name.LocalName == "TranslateTransform"
                 && element.Attribute("Y")?.Value == "{StaticResource MotionRevealOffset}");
+    }
+
+    [Fact]
+    public void MainWindow_FeedbackHostOverlaysContentWithoutFocusOrHitTesting()
+    {
+        var document = LoadMainWindowXaml();
+        var windowRoot = FindElementByName(document, "MainWindowRoot")!;
+        var children = windowRoot.Elements().ToArray();
+
+        // Both live in the single cell of MainWindowRoot, so the snackbar never pushes the content.
+        Assert.Equal(2, children.Length);
+        Assert.Equal("MainContentScrollViewer", children[0].Attribute(XamlNamespace + "Name")?.Value);
+        Assert.Equal("FeedbackHost", children[1].Attribute(XamlNamespace + "Name")?.Value);
+        Assert.All(children, child =>
+        {
+            Assert.Null(child.Attribute("Grid.Row"));
+            Assert.Null(child.Attribute("Grid.Column"));
+        });
+
+        var host = children[1];
+        Assert.Equal("Border", host.Name.LocalName);
+        Assert.Equal("FeedbackHost", host.Attribute("AutomationProperties.AutomationId")?.Value);
+        Assert.Equal("Polite", host.Attribute("AutomationProperties.LiveSetting")?.Value);
+        Assert.Equal("False", host.Attribute("IsHitTestVisible")?.Value);
+        Assert.Equal("False", host.Attribute("Focusable")?.Value);
+        Assert.Equal("Collapsed", host.Attribute("Visibility")?.Value);
+        Assert.Equal("0", host.Attribute("Opacity")?.Value);
+        Assert.Equal("Center", host.Attribute("HorizontalAlignment")?.Value);
+        Assert.Equal("Bottom", host.Attribute("VerticalAlignment")?.Value);
+        Assert.Equal("0,0,0,16", host.Attribute("Margin")?.Value);
+        Assert.Equal("480", host.Attribute("MaxWidth")?.Value);
+        Assert.Equal("10", host.Attribute("Panel.ZIndex")?.Value);
+        Assert.Equal("{StaticResource FeedbackSnackbarStyle}", host.Attribute("Style")?.Value);
+        Assert.Contains(
+            host.Descendants(),
+            element => element.Name.LocalName == "TranslateTransform"
+                && element.Attribute(XamlNamespace + "Name")?.Value == "FeedbackTranslate");
+
+        foreach (var name in new[] { "FeedbackGlyph", "FeedbackGlyphBackground", "FeedbackText" })
+        {
+            Assert.NotNull(FindDescendantByName(host, name));
+        }
+
+        var text = FindDescendantByName(host, "FeedbackText")!;
+        Assert.Equal("TextBlock", text.Name.LocalName);
+        Assert.Equal("FeedbackText", text.Attribute("AutomationProperties.AutomationId")?.Value);
+        Assert.Equal("Wrap", text.Attribute("TextWrapping")?.Value);
+        Assert.Equal("CharacterEllipsis", text.Attribute("TextTrimming")?.Value);
+        // Two lines of the body text style (LineHeight 20).
+        Assert.Equal("40", text.Attribute("MaxHeight")?.Value);
+
+        // Nothing inside the snackbar can take focus or act on input.
+        Assert.DoesNotContain(
+            host.Descendants(),
+            element => element.Name.LocalName is "Button" or "TextBox" or "Hyperlink");
+    }
+
+    [Fact]
+    public void Controls_FeedbackSnackbarStyleIsKeyedAndNoImplicitStylesExist()
+    {
+        var controls = LoadControlsXaml();
+        var snackbar = FindResourceByKey(controls, "FeedbackSnackbarStyle");
+
+        Assert.Equal("Style", snackbar.Name.LocalName);
+        Assert.Equal("{x:Type Border}", snackbar.Attribute("TargetType")?.Value);
+        AssertSetter(snackbar, "Background", "{StaticResource SurfaceElevatedBrush}");
+        AssertSetter(snackbar, "BorderBrush", "{StaticResource BorderStrongBrush}");
+        AssertSetter(snackbar, "CornerRadius", "{StaticResource ButtonCornerRadius}");
+        AssertSetter(snackbar, "Padding", "{StaticResource Inset12}");
+        AssertSetter(snackbar, "Effect", "{StaticResource FeedbackShadowEffect}");
+
+        var feedbackShadow = FindResourceByKey(controls, "FeedbackShadowEffect");
+        var overlayShadow = FindResourceByKey(controls, "OverlayShadowEffect");
+        Assert.True(
+            double.Parse(feedbackShadow.Attribute("Opacity")!.Value, System.Globalization.CultureInfo.InvariantCulture)
+            < double.Parse(overlayShadow.Attribute("Opacity")!.Value, System.Globalization.CultureInfo.InvariantCulture));
+
+        // Every theme resource is keyed: no implicit (TargetType-only) styles.
+        foreach (var resource in controls.Root!.Elements())
+        {
+            Assert.NotNull(resource.Attribute(XamlNamespace + "Key"));
+        }
+
+        // MainWindow has exactly one resources block: Window.Resources with the only two allowed
+        // implicit styles, the window-scoped dark scrollbar and tooltip (Phase UI-8, visual_direction.md §25).
+        var resourceBlocks = LoadMainWindowXaml()
+            .Descendants()
+            .Where(element => element.Name.LocalName.EndsWith(".Resources", StringComparison.Ordinal))
+            .ToArray();
+        var windowResources = Assert.Single(resourceBlocks);
+        Assert.Equal("Window.Resources", windowResources.Name.LocalName);
+        Assert.Equal("Window", windowResources.Parent!.Name.LocalName);
+        Assert.Null(windowResources.Parent.Parent);
+        var implicitStyles = windowResources.Elements().ToArray();
+        Assert.Equal(2, implicitStyles.Length);
+        foreach (var (style, targetType, basedOn) in new[]
+        {
+            (implicitStyles[0], "{x:Type ScrollBar}", "{StaticResource DarkScrollBarStyle}"),
+            (implicitStyles[1], "{x:Type ToolTip}", "{StaticResource AppToolTipStyle}"),
+        })
+        {
+            Assert.Equal("Style", style.Name.LocalName);
+            Assert.Null(style.Attribute(XamlNamespace + "Key"));
+            Assert.Equal(targetType, style.Attribute("TargetType")?.Value);
+            Assert.Equal(basedOn, style.Attribute("BasedOn")?.Value);
+            Assert.Empty(style.Elements());
+        }
+    }
+
+    [Fact]
+    public void MainWindow_CodeBehindReportsActionResultsThroughInAppFeedback()
+    {
+        var code = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "FeatherScribe.App", "MainWindow.xaml.cs"));
+
+        // Exception text never reaches the UI; it is written to the debug log only.
+        Assert.DoesNotContain("ex.Message", code);
+        Assert.DoesNotMatch(new Regex(@"(SetStatus|ShowFeedback)\([^;]*\bex\b"), code);
+        Assert.Equal(4, Regex.Matches(code, @"Debug\.WriteLine\(").Count);
+
+        // Messages come from the single catalog, not from string literals in the code-behind.
+        foreach (var constant in new[]
+        {
+            "CopySucceeded",
+            "RepasteSucceeded",
+            "RepasteTargetNotFound",
+            "ReformatStarted",
+            "ReformatNotStarted",
+            "CandidateAdopted",
+            "NoCandidateToAdopt",
+            "CopyFailed",
+            "RepasteFailed",
+            "ReformatFailed",
+            "AdoptFailed",
+        })
+        {
+            Assert.Contains($"InAppFeedbackMessages.{constant}", code);
+        }
+
+        foreach (var message in new[]
+        {
+            InAppFeedbackMessages.CopySucceeded,
+            InAppFeedbackMessages.RepasteSucceeded,
+            InAppFeedbackMessages.RepasteTargetNotFound,
+            InAppFeedbackMessages.ReformatStarted,
+            InAppFeedbackMessages.ReformatNotStarted,
+            InAppFeedbackMessages.CandidateAdopted,
+            InAppFeedbackMessages.NoCandidateToAdopt,
+            InAppFeedbackMessages.CopyFailed,
+            InAppFeedbackMessages.RepasteFailed,
+            InAppFeedbackMessages.AdoptFailed,
+        })
+        {
+            Assert.DoesNotContain($"\"{message}\"", code);
+        }
+
+        // Operation results no longer overwrite the continuous-state StatusText.
+        Assert.DoesNotContain("直近結果をクリップボードへコピーしました", code);
+        Assert.DoesNotContain("貼り付け先を特定できませんでした", code);
+        Assert.DoesNotContain("再整形できるraw結果がありません", code);
+        Assert.DoesNotContain("手動採用できる候補がありません", code);
+        Assert.DoesNotContain("不採用候補を手動採用しました", code);
+
+        // Status text comes from the single UserFacingText source (Phase UI-6).
+        Assert.Contains("SetStatus(UserFacingText.StatusCandidateAdopted);", code);
+        Assert.Contains("SetStatus(UserFacingText.ForReformatStarted(startedMode));", code);
+        Assert.Contains("SetStatus(UserFacingText.ForResult(result));", code);
+        Assert.Contains("SetStatus(UserFacingText.ForBackgroundFormatting(result));", code);
+        Assert.Contains("UserFacingText.ForStage(stage, _controller.ActiveMode, message)", code);
+        Assert.Equal("整形候補を採用済み", UserFacingText.StatusCandidateAdopted);
+        Assert.Equal("再整形中…（高品質）", UserFacingText.ForReformatStarted(FeatherScribe.Core.FormattingMode.PlainQuality));
+        Assert.Equal("再整形中…", UserFacingText.ForReformatStarted(FeatherScribe.Core.FormattingMode.PlainFast));
+        Assert.DoesNotContain("ToDisplayReason", code);
+
+        // Exactly one feedback timer, created once, reused and stopped on close.
+        Assert.Single(Regex.Matches(code, @"\bDispatcherTimer\s+_\w+"));
+        Assert.Single(Regex.Matches(code, @"new DispatcherTimer\("));
+        Assert.Contains("_feedbackTimer.Interval = feedback.Duration;", code);
+        var onClosing = code[code.IndexOf("protected override void OnClosing", StringComparison.Ordinal)..];
+        Assert.Contains("_feedbackTimer.Stop();", onClosing);
+
+        // Hide completion is guarded by the state version; showing never moves focus.
+        Assert.Contains("_feedbackState.CompleteHide(hideVersion)", code);
+        Assert.Contains("FeedbackTransition.RecoverFromHiding", code);
+        Assert.Contains("FeedbackTransition.UpdateInPlace", code);
+        Assert.DoesNotContain(".Focus()", code);
+        Assert.DoesNotContain("Activate()", code);
     }
 
     [Fact]
@@ -692,6 +903,15 @@ public sealed class ThemeResourceTests
         return element
             .Descendants()
             .FirstOrDefault(candidate => candidate.Attribute(XamlNamespace + "Name")?.Value == name);
+    }
+
+    private static void AssertSetter(XElement style, string property, string value)
+    {
+        Assert.Contains(
+            style.Elements(),
+            element => element.Name.LocalName == "Setter"
+                && element.Attribute("Property")?.Value == property
+                && element.Attribute("Value")?.Value == value);
     }
 
     private static void AssertButtonPressMotion(XElement style)

@@ -133,6 +133,23 @@ raw transcript fallbackと辞書補正 (pre/post) を併用し、整形は「読
   再コピーで利用する設計とした。タイムアウト時は即raw transcriptを使用する。
 - VRAMが十分なGPU環境では `gpuLayers` を調整することで大幅な高速化が見込める (未計測)。
 
+### 2026-10-01 追記: thinking無効化後の再計測
+
+上記の遅さの主因は、gemma4が回答の前に非表示の推論 (thinking) を生成していたことだった。
+`OllamaRequestBuilder` (アプリ) と `tools/run_format_test.ps1` が `"think": false` を送るよう
+修正した後、CPU実行 (GPU未使用) の検証機で同じ約230文字の入力
+(`samples/raw/sample_001_raw.txt`、plain.mdプロンプト、`tools/run_format_test.ps1`) を再計測した。
+
+| モデル | ロード込み | warm |
+| --- | --- | --- |
+| gemma4:e2b | 19.0秒 | 9.3秒 |
+| gemma4:e4b | 33.3秒 | 15.4秒 |
+
+- 短文 (約20文字): e2b 4.3秒、e4b 21.7秒 (ロード込み)。短文1件のリクエストでは修正前65秒→修正後7秒を確認。
+- 整形ベンチマーク (`num_predict` 128): 修正前のgemma4:e2bはトークンをthinkingで使い切って出力が空になり失格だったが、修正後はスコア93。
+- e2bでもwarmで既定タイムアウト8秒を超えうるため、`llm.enabled: false` / `rawFirstPaste: true` の既定は維持する。
+  上の表と結論は修正前の記録として残す。
+
 ## 5. 実マイク検証 (2026-07-04 追記)
 
 スピーカーでTTSサンプルを再生し実マイク (Realtek(R) Audio) で録音→whisper.cppで
@@ -150,4 +167,9 @@ raw transcript fallbackと辞書補正 (pre/post) を併用し、整形は「読
 | whisper smallモデルの誤認識 | 固有名詞が崩れる | 個人辞書 (pre/post補正 + プロンプト注入) で緩和 |
 | llama.cpp server経路が未検証 | 代替経路の即応性なし | インターフェース分離済み。必要時に実装・検証 |
 | 肉声での手動受け入れテスト未実施 | 実運用の認識率・貼り付け互換性が未確認 | docs/acceptance_test.md の手順で実施する (マイク録音経路自体はループバックで確認済み) |
-| tools/*.ps1 が未検証 | セットアップスクリプトの不具合リスク | 本開発セッションはPowerShell実行が許可されていないため未検証。同等処理 (ダウンロード・展開・whisper/Ollama呼び出し) はbash/dotnetで検証済み。初回実行時に確認すること |
+| tools/*.ps1 の初回ダウンロード経路が未検証 | セットアップスクリプトの不具合リスク | 2026-10-01 に Windows PowerShell 5.1 で全スクリプトの実行を確認 (ローカルスタック取得済みのため、ダウンロード処理自体は未実行)。確認時に setup_gemma_ollama.ps1 のモデル保存先不一致と archive_featherscribe.ps1 のサンプル出力混入を修正 |
+
+> 2026-10-01 追記: 「CPU実行のGemma 4整形が遅い」は、thinking無効化 (`"think": false`) により
+> 約230文字の発話でe2b約9秒・e4b約15秒 (warm) まで改善した (§4の追記参照)。
+> なお現在の既定は `llm.timeoutSeconds: 8` のため、長文やモデル読み込み直後は引き続きタイムアウトしうる
+> (その場合はraw transcriptへフォールバックする)。

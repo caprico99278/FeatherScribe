@@ -7,6 +7,7 @@ public sealed class AppSettings
     public RecordingSettings Recording { get; init; } = new();
     public OutputSettings Output { get; init; } = new();
     public HotkeySettings Hotkeys { get; init; } = new();
+    public SelectionEditSettings SelectionEdit { get; init; } = new();
     public PrivacySettings Privacy { get; init; } = new();
     public DebugSettings Debug { get; init; } = new();
 }
@@ -94,6 +95,43 @@ public sealed class HotkeySettings
     public string Bullet { get; init; } = "Ctrl+Shift+F12";
     public string Memo { get; init; } = "Ctrl+Alt+Shift+M";
     public string DevInstruction { get; init; } = "Ctrl+Alt+Shift+D";
+
+    /// <summary>Selected-text editing (Phase UX-1). Empty disables the hotkey.</summary>
+    public string EditSelection { get; init; } = "Ctrl+Shift+F7";
+}
+
+/// <summary>
+/// Selected-text editing (Phase UX-1): the preset mode applied to the selection and how long to wait
+/// for the target app to copy it. Inert while llm.enabled is false.
+/// </summary>
+public sealed class SelectionEditSettings
+{
+    public const FormattingMode DefaultMode = FormattingMode.Polite;
+    public const int DefaultCaptureTimeoutMilliseconds = 600;
+    public const int MinCaptureTimeoutMilliseconds = 100;
+    public const int MaxCaptureTimeoutMilliseconds = 5000;
+
+    public string Mode { get; init; } = nameof(FormattingMode.Polite);
+    public int CaptureTimeoutMilliseconds { get; init; } = DefaultCaptureTimeoutMilliseconds;
+
+    /// <summary>The configured mode, or <see cref="DefaultMode"/> when it is invalid or NoFormat.</summary>
+    public FormattingMode ParsedMode => TryParseMode(Mode, out var mode) ? mode : DefaultMode;
+
+    /// <summary>True for a defined formatting mode other than NoFormat (selection edit always formats).</summary>
+    public static bool TryParseMode(string? text, out FormattingMode mode)
+    {
+        if (!string.IsNullOrWhiteSpace(text) &&
+            text.Trim().All(char.IsAsciiLetter) &&
+            Enum.TryParse(text.Trim(), ignoreCase: true, out mode) &&
+            Enum.IsDefined(mode) &&
+            mode != FormattingMode.NoFormat)
+        {
+            return true;
+        }
+
+        mode = DefaultMode;
+        return false;
+    }
 }
 
 public sealed class PrivacySettings

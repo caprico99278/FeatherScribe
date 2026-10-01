@@ -9,6 +9,8 @@
     <Color x:Key="PrimaryTextColor">#E8EEF2</Color>
     <Color x:Key="SecondaryTextColor">#AEBBC5</Color>
     <Color x:Key="MutedTextColor">#74828D</Color>
+    <!-- Disabled control text: >= 4.5:1 on Surface and SurfaceElevated, dimmer than SecondaryText (visual_direction.md §25). -->
+    <Color x:Key="DisabledTextColor">#97A3AD</Color>
     <Color x:Key="AccentColor">#7FD8D2</Color>
     <Color x:Key="AccentHoverColor">#95E4DE</Color>
     <Color x:Key="AccentPressedColor">#5DBCB7</Color>
@@ -19,6 +21,8 @@
     <Color x:Key="OverlayBackgroundColor">#D91A222A</Color>
     <Color x:Key="SelectionColor">#28484C</Color>
     <Color x:Key="FocusColor">#9CEBE6</Color>
+    <!-- DropShadowEffect color (OverlayShadowEffect, FeedbackShadowEffect); opacity is set on the effect. -->
+    <Color x:Key="ShadowColor">#000000</Color>
 
     <SolidColorBrush x:Key="WindowBackgroundBrush" Color="{StaticResource WindowBackgroundColor}" />
     <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}" />
@@ -29,6 +33,7 @@
     <SolidColorBrush x:Key="PrimaryTextBrush" Color="{StaticResource PrimaryTextColor}" />
     <SolidColorBrush x:Key="SecondaryTextBrush" Color="{StaticResource SecondaryTextColor}" />
     <SolidColorBrush x:Key="MutedTextBrush" Color="{StaticResource MutedTextColor}" />
+    <SolidColorBrush x:Key="DisabledTextBrush" Color="{StaticResource DisabledTextColor}" />
     <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
     <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}" />
     <SolidColorBrush x:Key="AccentPressedBrush" Color="{StaticResource AccentPressedColor}" />

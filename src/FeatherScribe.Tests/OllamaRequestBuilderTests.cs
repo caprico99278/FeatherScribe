@@ -25,6 +25,48 @@ public class OllamaRequestBuilderTests
     }
 
     [Fact]
+    public void BuildChatRequestJson_DisablesThinkingAtTopLevel()
+    {
+        var json = OllamaRequestBuilder.BuildChatRequestJson(
+            "gemma4:e2b",
+            "p",
+            0.1,
+            gpuLayers: 0,
+            numPredict: 128,
+            numContext: 1024,
+            keepAlive: "30m");
+
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        Assert.Equal(JsonValueKind.False, root.GetProperty("think").ValueKind);
+        Assert.False(root.GetProperty("options").TryGetProperty("think", out _));
+
+        // 既存フィールドは従来どおり
+        var names = root.EnumerateObject().Select(p => p.Name).ToArray();
+        Assert.Equal(["model", "messages", "stream", "keep_alive", "options", "think"], names);
+        Assert.Equal("gemma4:e2b", root.GetProperty("model").GetString());
+        Assert.False(root.GetProperty("stream").GetBoolean());
+        Assert.Equal("30m", root.GetProperty("keep_alive").GetString());
+        var options = root.GetProperty("options");
+        Assert.Equal(0.1, options.GetProperty("temperature").GetDouble());
+        Assert.Equal(0, options.GetProperty("num_gpu").GetInt32());
+        Assert.Equal(128, options.GetProperty("num_predict").GetInt32());
+        Assert.Equal(1024, options.GetProperty("num_ctx").GetInt32());
+    }
+
+    [Fact]
+    public void BuildChatRequestJson_DefaultOptions_StillSendsThinkFalse()
+    {
+        var json = OllamaRequestBuilder.BuildChatRequestJson("m", "p", 0.1);
+
+        using var document = JsonDocument.Parse(json);
+        var names = document.RootElement.EnumerateObject().Select(p => p.Name).ToArray();
+        Assert.Equal(["model", "messages", "stream", "options", "think"], names);
+        Assert.False(document.RootElement.GetProperty("think").GetBoolean());
+    }
+
+    [Fact]
     public void BuildChatRequestJson_JapaneseIsNotEscapedBeyondJson()
     {
         var json = OllamaRequestBuilder.BuildChatRequestJson("m", "こんにちは「テスト」", 0);

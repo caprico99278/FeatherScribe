@@ -10,6 +10,13 @@
     <sys:Double x:Key="Space40">40</sys:Double>
     <sys:Double x:Key="Space48">48</sys:Double>
 
+    <!-- RecordingOverlay volume-linked meter (visual_direction.md §24) -->
+    <sys:Double x:Key="LevelMeterMinBarHeight">3</sys:Double>
+    <sys:Double x:Key="LevelMeterMaxBarHeight">14</sys:Double>
+
+    <!-- MainWindow scrollbar (visual_direction.md §25): 8 px track, 6 px thumb with fully rounded ends. -->
+    <sys:Double x:Key="ScrollBarSize">8</sys:Double>
+
     <Thickness x:Key="Inset4">4</Thickness>
     <Thickness x:Key="Inset8">8</Thickness>
     <Thickness x:Key="Inset12">12</Thickness>
@@ -20,10 +27,13 @@
     <Thickness x:Key="OverlayPadding">16,8</Thickness>
     <Thickness x:Key="FocusRingThickness">2</Thickness>
     <Thickness x:Key="StandardBorderThickness">1</Thickness>
+    <!-- Transparent room around the overlay pill for OverlayShadowEffect: BlurRadius 18 + ShadowDepth 3 (visual_direction.md §25). -->
+    <Thickness x:Key="OverlayShadowInset">21</Thickness>
 
     <CornerRadius x:Key="SmallControlCornerRadius">6</CornerRadius>
     <CornerRadius x:Key="ButtonCornerRadius">8</CornerRadius>
     <CornerRadius x:Key="CardCornerRadius">16</CornerRadius>
     <CornerRadius x:Key="OverlayCornerRadius">999</CornerRadius>
     <CornerRadius x:Key="PillCornerRadius">999</CornerRadius>
+    <CornerRadius x:Key="ScrollBarThumbCornerRadius">3</CornerRadius>
 </ResourceDictionary>

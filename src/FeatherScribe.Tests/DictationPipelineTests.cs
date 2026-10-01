@@ -152,8 +152,15 @@ public class DictationPipelineTests
         };
         var formatterGate = new TaskCompletionSource<FormatResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        // 整形は Task.Run 上で非同期に呼ばれるため、呼び出しを通知で待つ
+        var formatterCalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var (pipeline, formatter, output) = CreatePipeline(
-            settings, new FakeFormatter(_ => formatterGate.Task));
+            settings,
+            new FakeFormatter(_ =>
+            {
+                formatterCalled.TrySetResult();
+                return formatterGate.Task;
+            }));
 
         var runTask = RunAsync(pipeline, FormattingMode.PlainFast);
         var completed = await Task.WhenAny(runTask, Task.Delay(EventTimeout));
@@ -163,6 +170,7 @@ public class DictationPipelineTests
         Assert.True(result.Success);
         Assert.True(result.BackgroundFormattingStarted);
         Assert.Equal(["えーとこれはテストです"], output.Outputs);
+        await formatterCalled.Task.WaitAsync(EventTimeout);
         Assert.Equal(1, formatter.CallCount); // 整形はバックグラウンドで開始済み
 
         formatterGate.SetResult(new FormatResult("整形済み", false, null));

@@ -1,0 +1,184 @@
+[
+  {
+    "id": "u01",
+    "category": "general",
+    "text": "今日の打ち合わせの内容を共有します。",
+    "focusTokens": []
+  },
+  {
+    "id": "u02",
+    "category": "general",
+    "text": "資料は明日の朝までに確認しておきます。",
+    "focusTokens": []
+  },
+  {
+    "id": "u03",
+    "category": "general",
+    "text": "音声入力の精度を上げるために、いくつかのモデルを比較しています。",
+    "focusTokens": []
+  },
+  {
+    "id": "u04",
+    "category": "time",
+    "text": "会議は午後3時15分から始まります。",
+    "focusTokens": ["午後3時15分"]
+  },
+  {
+    "id": "u05",
+    "category": "time",
+    "text": "明日の朝9時30分に駅前で集合してください。",
+    "focusTokens": ["9時30分"]
+  },
+  {
+    "id": "u06",
+    "category": "time",
+    "text": "締め切りは今夜23時59分です。",
+    "focusTokens": ["23時59分"]
+  },
+  {
+    "id": "u07",
+    "category": "date",
+    "text": "次回のリリースは2026年10月1日を予定しています。",
+    "focusTokens": ["2026年10月1日"]
+  },
+  {
+    "id": "u08",
+    "category": "date",
+    "text": "契約の更新日は12月25日なので、それまでに返事をください。",
+    "focusTokens": ["12月25日"]
+  },
+  {
+    "id": "u09",
+    "category": "number",
+    "text": "このケーブルは1,280円で購入しました。",
+    "focusTokens": ["1,280円"]
+  },
+  {
+    "id": "u10",
+    "category": "number",
+    "text": "前年比で売上が3.5%増加しました。",
+    "focusTokens": ["3.5%"]
+  },
+  {
+    "id": "u11",
+    "category": "number",
+    "text": "在庫は残り42個なので、追加で150個を発注します。",
+    "focusTokens": ["42個", "150個"]
+  },
+  {
+    "id": "u12",
+    "category": "punctuation",
+    "text": "まず、録音を開始します。次に、文字起こしを確認します。最後に、貼り付けます。",
+    "focusTokens": []
+  },
+  {
+    "id": "u13",
+    "category": "punctuation",
+    "text": "本当にそれで大丈夫ですか？もう一度、念のため確認してください。",
+    "focusTokens": []
+  },
+  {
+    "id": "u14",
+    "category": "self-correction",
+    "text": "明日、いや明後日の10時にお願いします。",
+    "focusTokens": ["10時"]
+  },
+  {
+    "id": "u15",
+    "category": "self-correction",
+    "text": "資料は5部、あ、すみません、6部印刷してください。",
+    "focusTokens": ["6部"]
+  },
+  {
+    "id": "u16",
+    "category": "self-correction",
+    "text": "担当は田中さん、じゃなくて佐藤さんに変更です。",
+    "focusTokens": ["佐藤"]
+  },
+  {
+    "id": "u17",
+    "category": "fast",
+    "text": "了解です、それではその方向で進めますので、問題があればすぐに連絡してください。",
+    "focusTokens": [],
+    "readingNote": "早口で"
+  },
+  {
+    "id": "u18",
+    "category": "fast",
+    "text": "午後2時の会議を4時に変更して、参加者全員に連絡しておいてください。",
+    "focusTokens": ["午後2時", "4時"],
+    "readingNote": "早口で"
+  },
+  {
+    "id": "u19",
+    "category": "short",
+    "text": "了解です。",
+    "focusTokens": []
+  },
+  {
+    "id": "u20",
+    "category": "short",
+    "text": "ありがとう。",
+    "focusTokens": []
+  },
+  {
+    "id": "u21",
+    "category": "short",
+    "text": "3時に行きます。",
+    "focusTokens": ["3時"]
+  },
+  {
+    "id": "u22",
+    "category": "long",
+    "text": "本日の定例会議では、来月リリース予定の新機能について進捗を確認し、残っている課題を洗い出しました。特に音声入力の精度と処理速度については、実際の利用場面を想定して追加の検証を行う必要があるという意見が多く出ました。",
+    "focusTokens": []
+  },
+  {
+    "id": "u23",
+    "category": "long",
+    "text": "来週の出張は月曜日の朝に東京を出発して、火曜日の夕方に大阪で取引先と打ち合わせを行い、水曜日の午前中には戻る予定です。移動中も作業できるように、必要な資料はすべて事前にノートパソコンへ保存しておきます。",
+    "focusTokens": ["東京", "大阪"]
+  },
+  {
+    "id": "u24",
+    "category": "alphanumeric",
+    "text": "新しいAPI v2では認証の仕組みが変わります。",
+    "focusTokens": ["API v2"]
+  },
+  {
+    "id": "u25",
+    "category": "alphanumeric",
+    "text": "GPT-5とClaudeの出力を比較してレポートにまとめます。",
+    "focusTokens": ["GPT-5", "Claude"]
+  },
+  {
+    "id": "u26",
+    "category": "technical",
+    "text": ".NETとC#でWPFのデスクトップアプリを開発しています。",
+    "focusTokens": [".NET", "C#", "WPF"]
+  },
+  {
+    "id": "u27",
+    "category": "technical",
+    "text": "設定はJSONファイルに保存して、起動時に読み込みます。",
+    "focusTokens": ["JSON"]
+  },
+  {
+    "id": "u28",
+    "category": "proper-noun",
+    "text": "PhoenixQuantのバックテスト結果をFeatherScribeで音声メモに残します。",
+    "focusTokens": ["PhoenixQuant", "FeatherScribe"]
+  },
+  {
+    "id": "u29",
+    "category": "proper-noun",
+    "text": "whisper.cppで文字起こしをして、Ollamaで文章を整形します。",
+    "focusTokens": ["whisper.cpp", "Ollama"]
+  },
+  {
+    "id": "u30",
+    "category": "proper-noun",
+    "text": "Codexに実装を依頼して、テストが通るか確認します。",
+    "focusTokens": ["Codex"]
+  }
+]

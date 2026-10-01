@@ -39,7 +39,8 @@ public static class OllamaRequestBuilder
             ],
             Stream: false,
             KeepAlive: keepAlive,
-            new ChatOptions(temperature, gpuLayers, numPredict, numContext));
+            new ChatOptions(temperature, gpuLayers, numPredict, numContext),
+            Think: false);
 
         return JsonSerializer.Serialize(request, SerializerOptions);
     }
@@ -72,7 +73,11 @@ public static class OllamaRequestBuilder
         [property: JsonPropertyName("keep_alive")]
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? KeepAlive,
-        ChatOptions Options);
+        ChatOptions Options,
+        // 整形に推論は不要なので常に think=false を送る。gemma4 などの思考対応モデルは未指定だと
+        // 非表示の推論(message.thinking)にトークンを費やし、CPU 実測で 65 秒→7 秒の差が出る。
+        // num_predict 指定時は推論だけで上限に達し content が空になることもある。
+        bool Think);
 
     private sealed record ChatMessage(string Role, string Content);
 
