@@ -126,8 +126,44 @@ public sealed class JsonAppSettingsProvider : IAppSettingsProvider
             Recording = settings.Recording,
             Output = settings.Output,
             Hotkeys = settings.Hotkeys,
+            SelectionEdit = ValidateSelectionEdit(settings.SelectionEdit),
             Privacy = settings.Privacy,
             Debug = settings.Debug,
+        };
+    }
+
+    /// <summary>
+    /// selectionEdit: NoFormat or an unknown mode falls back to Polite, an out-of-range capture timeout is
+    /// clamped; both are reported through <see cref="LastWarnings"/>.
+    /// </summary>
+    private SelectionEditSettings ValidateSelectionEdit(SelectionEditSettings? selectionEdit)
+    {
+        selectionEdit ??= new SelectionEditSettings();
+
+        var mode = selectionEdit.Mode;
+        if (!SelectionEditSettings.TryParseMode(mode, out var parsedMode))
+        {
+            parsedMode = SelectionEditSettings.DefaultMode;
+            _lastWarnings.Add(
+                $"selectionEdit.mode \"{mode}\" is not supported (NoFormat or unknown); using {parsedMode}.");
+        }
+
+        var timeout = selectionEdit.CaptureTimeoutMilliseconds;
+        var clampedTimeout = Math.Clamp(
+            timeout,
+            SelectionEditSettings.MinCaptureTimeoutMilliseconds,
+            SelectionEditSettings.MaxCaptureTimeoutMilliseconds);
+        if (clampedTimeout != timeout)
+        {
+            _lastWarnings.Add(
+                $"selectionEdit.captureTimeoutMilliseconds {timeout} is out of range " +
+                $"({SelectionEditSettings.MinCaptureTimeoutMilliseconds}-{SelectionEditSettings.MaxCaptureTimeoutMilliseconds}); using {clampedTimeout}.");
+        }
+
+        return new SelectionEditSettings
+        {
+            Mode = parsedMode.ToString(),
+            CaptureTimeoutMilliseconds = clampedTimeout,
         };
     }
 

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>FeatherScribe.Tools.AsrBenchmark</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same version as tools/MakeSampleAudio (no new package versions). -->
+    <PackageReference Include="System.Speech" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- WhisperCppCommandBuilder / NAudioRecorder reuse; NAudio comes transitively. -->
+    <ProjectReference Include="..\..\src\FeatherScribe.Core\FeatherScribe.Core.csproj" />
+    <ProjectReference Include="..\..\src\FeatherScribe.Infrastructure\FeatherScribe.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

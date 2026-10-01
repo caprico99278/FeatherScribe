@@ -14,6 +14,11 @@ trim_trailing_whitespace = false
 charset = utf-8
 end_of_line = lf
 
+# Batch files: ASCII-only content, CRLF (cmd.exe misparses LF-only batch files).
+[*.{cmd,bat}]
+charset = utf-8
+end_of_line = crlf
+
 [*.cs]
 charset = utf-8
 end_of_line = lf

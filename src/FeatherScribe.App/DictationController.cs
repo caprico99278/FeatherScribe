@@ -153,15 +153,73 @@ public sealed class DictationController
         }
     }
 
+    /// <summary>True while a dictation is recording or processing (read-only; used by selected-text editing).</summary>
+    public bool IsBusy
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _state != State.Idle;
+            }
+        }
+    }
+
+    /// <summary>True iff <see cref="ReformatLast"/> would start a reformat now (same predicate).</summary>
+    public bool CanReformat
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return CanReformatCore(out _, out _);
+            }
+        }
+    }
+
+    /// <summary>True when there is a latest result to copy or paste.</summary>
+    public bool HasLatestResult
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return LastResult is not null;
+            }
+        }
+    }
+
+    /// <summary>True when a rejected formatting candidate can be adopted.</summary>
+    public bool HasRejectedCandidate
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return LastRejectedFormattedResult is not null;
+            }
+        }
+    }
+
+    // Must be called under _gate. Shared by CanReformat and ReformatLast so they never diverge.
+    private bool CanReformatCore(
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? raw,
+        out FormattingMode mode)
+    {
+        raw = LastRawResult;
+        mode = _lastFormattingMode ?? FormattingMode.NoFormat;
+        return _state == State.Idle &&
+            raw is not null &&
+            _lastFormattingMode is not null &&
+            mode != FormattingMode.NoFormat &&
+            _settings.Llm.Enabled;
+    }
+
     public FormattingMode? ReformatLast()
     {
         lock (_gate)
         {
-            if (_state != State.Idle ||
-                LastRawResult is not { } raw ||
-                _lastFormattingMode is not { } mode ||
-                mode == FormattingMode.NoFormat ||
-                !_settings.Llm.Enabled)
+            if (!CanReformatCore(out var raw, out var mode))
             {
                 return null;
             }

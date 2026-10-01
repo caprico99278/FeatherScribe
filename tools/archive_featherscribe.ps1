@@ -1,7 +1,8 @@
 # FeatherScribe source archive script.
 # Packs source code and documentation into a ZIP. Git history, the local runtime stack,
 # build outputs, IDE/agent working files, large generated files such as models and audio,
-# and local-only files ignored by .gitignore (docs/work, config/appsettings.local.json, ...)
+# and local-only files ignored by .gitignore (docs/work, config/appsettings.local.json,
+# generated sample outputs under samples/audio, samples/raw, samples/formatted, ...)
 # are excluded.
 # Usage: powershell -ExecutionPolicy Bypass -File tools/archive_featherscribe.ps1
 #        [-OutputDirectory path]
@@ -178,6 +179,21 @@ $excludeRelativePaths = @(
     "docs/work",
     "config/appsettings.local.json"
 )
+# Generated sample folders: only allow-listed files directly under these folders are archived;
+# every other file or subfolder there is skipped (it may hold real transcripts or audio).
+# This mirrors the samples/* rules in .gitignore; keep both lists in sync.
+$allowListedSampleDirectories = @(
+    "samples/audio",
+    "samples/raw",
+    "samples/formatted"
+)
+$allowListedSampleFiles = @(
+    "samples/audio/.gitkeep",
+    "samples/raw/.gitkeep",
+    "samples/formatted/.gitkeep",
+    "samples/raw/sample_001_raw.txt",
+    "samples/formatted/sample_001_formatted.txt"
+)
 $excludeFilePatterns = @(
     "*.user",
     "*.ilk",
@@ -208,6 +224,17 @@ function Get-ArchiveItems {
     foreach ($child in Get-ChildItem -LiteralPath $DirectoryPath -Force) {
         $relativeName = Get-RelativeEntryName $child.FullName
         if ($excludeRelativePaths -contains $relativeName) {
+            continue
+        }
+
+        $parentRelativeName = ""
+        $lastSlash = $relativeName.LastIndexOf('/')
+        if ($lastSlash -ge 0) {
+            $parentRelativeName = $relativeName.Substring(0, $lastSlash)
+        }
+
+        if (($allowListedSampleDirectories -contains $parentRelativeName) -and
+            -not ($allowListedSampleFiles -contains $relativeName)) {
             continue
         }
 
@@ -269,6 +296,7 @@ Write-Host "Creating archive: $archivePath"
 Write-Host "Excluded directory names: $($excludeDirectoryNames -join ', ')"
 Write-Host "Excluded local paths: $($excludeRelativePaths -join ', ')"
 Write-Host "Excluded file patterns: $($excludeFilePatterns -join ', ')"
+Write-Host "Excluded sample outputs: everything directly under $($allowListedSampleDirectories -join ', ') except $($allowListedSampleFiles -join ', ')"
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem

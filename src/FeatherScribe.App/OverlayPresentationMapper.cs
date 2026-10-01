@@ -14,7 +14,7 @@ internal static class OverlayPresentationMapper
         {
             PipelineStage.Recording => Persistent(OverlayVisualState.Recording, "録音中", showsElapsed: true),
             PipelineStage.Transcribing => Persistent(OverlayVisualState.Transcribing, "文字起こし中"),
-            PipelineStage.Formatting => Persistent(OverlayVisualState.Formatting, "文章を整えています"),
+            PipelineStage.Formatting => Persistent(OverlayVisualState.Formatting, "整形中"),
             PipelineStage.Outputting => Persistent(OverlayVisualState.Pasting, "貼り付け中"),
             PipelineStage.Completed => OverlayPresentation.Hidden,
             PipelineStage.Failed => Temporary(OverlayVisualState.Failed, "処理に失敗しました", FailedDelay),
@@ -28,6 +28,12 @@ internal static class OverlayPresentationMapper
             return Temporary(OverlayVisualState.Failed, "処理に失敗しました", FailedDelay);
         }
 
+        // A paste that did not happen is reported first, so the overlay never claims it was pasted.
+        if (!result.OutputSucceeded)
+        {
+            return Temporary(OverlayVisualState.Warning, "結果は画面に保持しています", ReviewDelay);
+        }
+
         if (result.BackgroundFormattingStarted)
         {
             return Persistent(OverlayVisualState.Formatting, "貼り付け完了・整形中");
@@ -36,11 +42,6 @@ internal static class OverlayPresentationMapper
         if (result.UsedFallback)
         {
             return Temporary(OverlayVisualState.Fallback, "未整形の文章を使用しました", ReviewDelay);
-        }
-
-        if (!result.OutputSucceeded)
-        {
-            return Temporary(OverlayVisualState.Warning, "結果をアプリ内に保持しました", ReviewDelay);
         }
 
         return Temporary(OverlayVisualState.Completed, "完了", CompletedDelay);
@@ -59,6 +60,24 @@ internal static class OverlayPresentationMapper
         }
 
         return Temporary(OverlayVisualState.Fallback, "未整形の文章を使用しました", ReviewDelay);
+    }
+
+    /// <summary>Selected-text editing: the selection was captured and is being formatted.</summary>
+    public static OverlayPresentation FromSelectionEditFormatting()
+        => Persistent(OverlayVisualState.Formatting, "整形中");
+
+    /// <summary>Selected-text editing result: always a temporary pill with the outcome's notice.</summary>
+    public static OverlayPresentation FromSelectionEditOutcome(SelectionEditOutcome outcome)
+    {
+        var text = UserFacingText.SelectionEditNotice(outcome.Status);
+        return outcome.Status switch
+        {
+            SelectionEditStatus.Replaced => Temporary(OverlayVisualState.Completed, text, CompletedDelay),
+            SelectionEditStatus.ReplaceFailed => Temporary(OverlayVisualState.Failed, text, FailedDelay),
+            // The longest notice (the edited text is on the clipboard) stays as long as a failure.
+            SelectionEditStatus.TargetChanged => Temporary(OverlayVisualState.Warning, text, FailedDelay),
+            _ => Temporary(OverlayVisualState.Warning, text, ReviewDelay),
+        };
     }
 
     private static OverlayPresentation Persistent(

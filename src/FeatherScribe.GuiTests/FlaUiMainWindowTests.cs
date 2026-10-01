@@ -4,6 +4,7 @@ using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
+using FlaUI.Core.WindowsAPI;
 using FlaUI.UIA3;
 
 namespace FeatherScribe.GuiTests;
@@ -23,6 +24,7 @@ public sealed class FlaUiMainWindowTests
             Assert.NotNull(window);
             Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(500));
             AssertFitsWithoutScrolling(window, "startup");
+            AssertFeedbackNotShown(window, "startup");
 
             ResizeWindowWidth(window, width: 720);
             Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(250));
@@ -30,6 +32,7 @@ public sealed class FlaUiMainWindowTests
             AssertRequiredControlsBeforeExpansion(window);
             AssertVisibleButtonsInitialState(window);
             AssertFitsWithoutScrolling(window, "startup at 720 width");
+            AssertFeedbackNotShown(window, "startup at 720 width");
 
             SetExpandedByClick(window, "CandidateExpander", expanded: true);
             AssertFitsWithoutScrolling(window, "candidate expanded");
@@ -63,6 +66,113 @@ public sealed class FlaUiMainWindowTests
         }
     }
 
+    [Fact]
+    public void MainWindow_FlaUiContract_ActionsDisabledAtStartupAndTabReachesResultThenCandidateHeader()
+    {
+        var appPath = FindAppExecutable();
+        using var app = Application.Launch(appPath);
+        using var automation = new UIA3Automation();
+
+        try
+        {
+            var window = app.GetMainWindow(automation, TimeSpan.FromSeconds(10));
+            Assert.NotNull(window);
+            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(500));
+
+            // No result yet: nothing to copy, paste, reformat or adopt.
+            AssertVisibleButtonsInitialState(window);
+
+            window.SetForeground();
+            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(300));
+
+            // StatusText is not a tab stop: the first Tab lands on the latest result.
+            Keyboard.Type(VirtualKeyShort.TAB);
+            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(250));
+            Assert.True(
+                FindRequired(window, "LastResultText").Properties.HasKeyboardFocus.Value,
+                $"First Tab must focus LastResultText, but focus is on '{DescribeFocus(automation)}'.");
+
+            Keyboard.Type(VirtualKeyShort.TAB);
+            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(250));
+            var candidateHeader = FindRequired(window, "CandidateExpander")
+                .FindFirstDescendant(cf => cf.ByControlType(ControlType.Button))
+                ?? throw new InvalidOperationException("CandidateExpander header button was not found.");
+            Assert.True(
+                candidateHeader.Properties.HasKeyboardFocus.Value,
+                $"Second Tab must focus the CandidateExpander header, but focus is on '{DescribeFocus(automation)}'.");
+
+            AssertFitsWithoutScrolling(window, "after keyboard navigation");
+        }
+        finally
+        {
+            app.Close();
+            if (!app.HasExited)
+            {
+                app.Kill();
+            }
+        }
+    }
+
+    [Fact]
+    public void MainWindow_FlaUiContract_DisabledActionsAreReportedDisabledAndStayVisibleAt720Width()
+    {
+        var appPath = FindAppExecutable();
+        using var app = Application.Launch(appPath);
+        using var automation = new UIA3Automation();
+
+        try
+        {
+            var window = app.GetMainWindow(automation, TimeSpan.FromSeconds(10));
+            Assert.NotNull(window);
+            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(500));
+
+            ResizeWindowWidth(window, width: 720);
+            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(250));
+            SetExpandedByClick(window, "CandidateExpander", expanded: true);
+
+            // Phase UI-8: disabled buttons have readable text (no opacity), are exposed as
+            // disabled to UI Automation, and are laid out on screen inside the window.
+            var windowRect = window.BoundingRectangle;
+            foreach (var automationId in new[] { "ReformatButton", "RecopyButton", "RepasteButton", "AdoptRejectedButton" })
+            {
+                var button = FindRequired(window, automationId);
+                Assert.False(button.Properties.IsEnabled.Value, $"{automationId} must be disabled before any result.");
+                Assert.False(button.Properties.IsOffscreen.Value, $"{automationId} must stay visible while disabled.");
+                var rect = button.BoundingRectangle;
+                Assert.True(rect.Width > 0 && rect.Height > 0, $"{automationId} must have a laid-out size.");
+                Assert.True(
+                    rect.Left >= windowRect.Left && rect.Right <= windowRect.Right,
+                    $"{automationId} must not be clipped horizontally at 720 width.");
+            }
+
+            // The page never scrolls horizontally, and does not scroll vertically when it fits.
+            var scroll = FindRequired(window, "MainContentScrollViewer").Patterns.Scroll.Pattern;
+            Assert.False(scroll.HorizontallyScrollable.Value);
+            AssertFitsWithoutScrolling(window, "candidate expanded with disabled actions at 720 width");
+        }
+        finally
+        {
+            app.Close();
+            if (!app.HasExited)
+            {
+                app.Kill();
+            }
+        }
+    }
+
+    private static string DescribeFocus(UIA3Automation automation)
+    {
+        var focused = automation.FocusedElement();
+        if (focused is null)
+        {
+            return "(none)";
+        }
+
+        var automationId = focused.Properties.AutomationId.ValueOrDefault;
+        var name = focused.Properties.Name.ValueOrDefault;
+        return $"{focused.Properties.ControlType.ValueOrDefault} id={automationId} name={name}";
+    }
+
     private static void AssertRequiredControlsBeforeExpansion(Window window)
     {
         var requiredAutomationIds = new[]
@@ -88,6 +198,21 @@ public sealed class FlaUiMainWindowTests
         Assert.NotNull(FindRequired(window, "RejectedResultText"));
         Assert.NotNull(FindRequired(window, "AdoptRejectedButton"));
         Assert.NotNull(FindRequired(window, "HotkeyHelpText"));
+    }
+
+    /// <summary>
+    /// The in-app feedback snackbar is collapsed until an action reports a result. A collapsed
+    /// element may be absent from the UIA tree; if it is present it must be offscreen.
+    /// </summary>
+    private static void AssertFeedbackNotShown(Window window, string state)
+    {
+        foreach (var automationId in new[] { "FeedbackHost", "FeedbackText" })
+        {
+            var element = window.FindFirstDescendant(cf => cf.ByAutomationId(automationId));
+            Assert.True(
+                element is null || element.Properties.IsOffscreen.Value,
+                $"[{state}] {automationId} must not be visible before any action result.");
+        }
     }
 
     private static void AssertVisibleButtonsInitialState(Window window)

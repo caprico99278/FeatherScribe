@@ -22,6 +22,47 @@ public class ToolScriptEncodingTests
         }
     }
 
+    // The repo-local ollama must store models in local/ollama-models (the folder
+    // tools/start_ollama_server.ps1 serves from), and an existing model must not be pulled again.
+    [Fact]
+    public void SetupGemmaOllama_UsesRepoModelFolderAndSkipsExistingModel()
+    {
+        var script = File.ReadAllText(Path.Combine(FindRepoRoot(), "tools", "setup_gemma_ollama.ps1"));
+
+        Assert.Contains("\"ollama-models\"", script);
+        var setModels = script.IndexOf("$env:OLLAMA_MODELS =", StringComparison.Ordinal);
+        var startServer = script.IndexOf("Start-Process -FilePath $ollamaExe", StringComparison.Ordinal);
+        var queryTags = script.IndexOf("/api/tags", StringComparison.Ordinal);
+        var pull = script.IndexOf("& $ollamaExe pull", StringComparison.Ordinal);
+
+        Assert.True(setModels >= 0, "OLLAMA_MODELS is not set.");
+        Assert.True(startServer > setModels, "OLLAMA_MODELS must be set before the server is started.");
+        Assert.True(queryTags >= 0 && pull > queryTags, "/api/tags must be queried before pulling.");
+        Assert.Contains("Model already exists. Skipping pull.", script);
+    }
+
+    // Thinking models (gemma4) spend the token budget on hidden reasoning unless think is
+    // disabled, so the manual format check must send think=false like the app does.
+    [Fact]
+    public void RunFormatTest_DisablesThinking()
+    {
+        var script = File.ReadAllText(Path.Combine(FindRepoRoot(), "tools", "run_format_test.ps1"));
+
+        Assert.Matches(@"(?m)^\s*think\s*=\s*\$false\b", script);
+    }
+
+    // Generated sample outputs (samples/raw, samples/formatted, samples/audio) can contain real
+    // transcripts, so the archive must mirror the .gitignore allow-list instead of packing them.
+    [Fact]
+    public void ArchiveScript_AllowListsOnlyVerifiedSampleFiles()
+    {
+        var script = File.ReadAllText(Path.Combine(FindRepoRoot(), "tools", "archive_featherscribe.ps1"));
+
+        Assert.Contains("\"samples/raw/sample_001_raw.txt\"", script);
+        Assert.Contains("\"samples/formatted/sample_001_formatted.txt\"", script);
+        Assert.Contains("$allowListedSampleFiles -contains $relativeName", script);
+    }
+
     private static string FindRepoRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

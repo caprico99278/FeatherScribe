@@ -13,6 +13,13 @@ public sealed class NAudioRecorder : IAudioRecorder
     private readonly RecordingSettings _settings;
     private readonly string _tempDirectory;
 
+    /// <summary>
+    /// Scalar input level (0..1) of the latest recording buffer, for the recording meter only.
+    /// Raised on the audio callback thread (about every 50 ms); 0 is raised once after recording stops.
+    /// Never carries samples. Not part of <see cref="IAudioRecorder"/>; the pipeline never sees it.
+    /// </summary>
+    public event Action<float>? AudioLevelChanged;
+
     public NAudioRecorder(RecordingSettings settings, string? tempDirectory = null)
     {
         _settings = settings;
@@ -44,6 +51,9 @@ public sealed class NAudioRecorder : IAudioRecorder
                 {
                     writer.Write(e.Buffer, 0, e.BytesRecorded);
                 }
+
+                // Outside the writer lock: the level is UI feedback only.
+                RaiseAudioLevel(e.Buffer, e.BytesRecorded);
             };
             waveIn.RecordingStopped += (_, e) => stopped.TrySetResult(e.Exception);
 
@@ -72,6 +82,7 @@ public sealed class NAudioRecorder : IAudioRecorder
                 writer.Dispose();
             }
             LastDuration = duration;
+            RaiseAudioLevelStopped();
         }
 
         return new RecordedAudio(
@@ -81,4 +92,32 @@ public sealed class NAudioRecorder : IAudioRecorder
     }
 
     private TimeSpan LastDuration { get; set; }
+
+    private void RaiseAudioLevel(byte[] buffer, int bytesRecorded)
+    {
+        try
+        {
+            var handler = AudioLevelChanged;
+            if (handler is not null)
+            {
+                handler(AudioLevelMeter.ComputeLevel(buffer, bytesRecorded));
+            }
+        }
+        catch (Exception)
+        {
+            // The level UI must never stop recording; the meter just stays still.
+        }
+    }
+
+    private void RaiseAudioLevelStopped()
+    {
+        try
+        {
+            AudioLevelChanged?.Invoke(0f);
+        }
+        catch (Exception)
+        {
+            // The level UI must never break the end of recording.
+        }
+    }
 }

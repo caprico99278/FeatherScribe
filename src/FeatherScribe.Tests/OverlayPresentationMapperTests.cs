@@ -18,7 +18,7 @@ public sealed class OverlayPresentationMapperTests
 
     [Theory]
     [InlineData(PipelineStage.Transcribing, "Transcribing", "文字起こし")]
-    [InlineData(PipelineStage.Formatting, "Formatting", "整え")]
+    [InlineData(PipelineStage.Formatting, "Formatting", "整形中")]
     [InlineData(PipelineStage.Outputting, "Pasting", "貼り付け")]
     public void ActiveStages_MapToPersistentOverlayStates(
         PipelineStage stage,
@@ -72,7 +72,8 @@ public sealed class OverlayPresentationMapperTests
 
     [Theory]
     [InlineData(false, false, false, "Failed")]
-    [InlineData(true, false, true, "Fallback")]
+    [InlineData(true, false, true, "Warning")]
+    [InlineData(true, true, true, "Fallback")]
     [InlineData(true, false, false, "Warning")]
     [InlineData(true, true, false, "Completed")]
     public void PipelineResult_MapsFinalState(
@@ -94,6 +95,44 @@ public sealed class OverlayPresentationMapperTests
         Assert.Equal(expectedState, presentation.State.ToString());
         Assert.False(presentation.IsPersistent);
         Assert.False(presentation.ShowsElapsed);
+    }
+
+    [Fact]
+    public void RawFirstPipelineResult_WithFailedPaste_ShowsWarningInsteadOfFormatting()
+    {
+        var result = new PipelineResult(
+            Success: true,
+            Text: "raw",
+            BackgroundFormattingStarted: true,
+            UsedFallback: false,
+            OutputSucceeded: false,
+            ErrorMessage: "paste target unavailable");
+
+        var presentation = OverlayPresentationMapper.FromPipelineResult(result);
+
+        Assert.Equal(OverlayVisualState.Warning, presentation.State);
+        Assert.Equal("結果は画面に保持しています", presentation.Text);
+        Assert.False(presentation.IsPersistent);
+        Assert.Equal(TimeSpan.FromMilliseconds(1800), presentation.AutoHideDelay);
+    }
+
+    [Fact]
+    public void Texts_UseUserFacingGlossary()
+    {
+        Assert.Equal("整形中", OverlayPresentationMapper.FromStage(PipelineStage.Formatting).Text);
+
+        var outputFailed = OverlayPresentationMapper.FromPipelineResult(
+            new PipelineResult(true, "text", false, false, OutputSucceeded: false, null));
+        Assert.Equal(OverlayVisualState.Warning, outputFailed.State);
+        Assert.Equal("結果は画面に保持しています", outputFailed.Text);
+
+        var rawPasted = OverlayPresentationMapper.FromPipelineResult(
+            new PipelineResult(true, "raw", BackgroundFormattingStarted: true, false, true, null));
+        Assert.Equal("貼り付け完了・整形中", rawPasted.Text);
+
+        var fallback = OverlayPresentationMapper.FromPipelineResult(
+            new PipelineResult(true, "raw", false, UsedFallback: true, true, "timeout"));
+        Assert.Equal("未整形の文章を使用しました", fallback.Text);
     }
 
     [Fact]

@@ -1,26 +1,51 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
+using System.Windows.Automation.Peers;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using FeatherScribe.Core;
 
 namespace FeatherScribe.App;
 
 /// <summary>
-/// 状態表示と直近結果のコピー/貼り付けを行う最小限のメイン画面。
+/// 状態表示と直近の結果のコピー/貼り付けを行う最小限のメイン画面。
 /// 閉じるボタンはアプリ終了として扱う。
 /// </summary>
 public partial class MainWindow : Window
 {
     private readonly DictationController _controller;
     private readonly ITextOutput _output;
-    private readonly ForegroundWindowTracker _foregroundWindowTracker = new();
+    private readonly ForegroundWindowTracker _foregroundWindowTracker;
 
-    public MainWindow(DictationController controller, AppSettings settings, ITextOutput output)
+    // In-App Feedback hide slide (DIP). Durations and easing come from Themes/Motion.xaml.
+    private const double FeedbackHideOffset = 4;
+
+    private readonly InAppFeedbackState _feedbackState = new();
+
+    // The only feedback timer: created once, reused (Stop -> Interval -> Start), stopped in OnClosing.
+    private readonly DispatcherTimer _feedbackTimer;
+
+    // Incremented whenever feedback motion starts or stops, so a superseded animation's
+    // Completed handler never resets or hides a newer presentation.
+    private int _feedbackMotionVersion;
+
+    /// <param name="output">Clipboard output for the explicit copy/repaste actions (no paste guard).</param>
+    /// <param name="foregroundWindowTracker">Owned by App; tracks the previous input target.</param>
+    public MainWindow(
+        DictationController controller,
+        AppSettings settings,
+        ITextOutput output,
+        ForegroundWindowTracker foregroundWindowTracker)
     {
         InitializeComponent();
         _controller = controller;
         _output = output;
+        _foregroundWindowTracker = foregroundWindowTracker;
+        _feedbackTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
+        _feedbackTimer.Tick += (_, _) => HideFeedback();
         Loaded += MainWindow_Loaded;
         SourceInitialized += (_, _) => FitHeightToContent();
         SizeChanged += (_, _) => KeepInsideWorkArea();
@@ -29,28 +54,18 @@ public partial class MainWindow : Window
         OperationGuideExpander.Expanded += (_, _) => FitHeightToContent();
         OperationGuideExpander.Collapsed += (_, _) => FitHeightToContent();
 
-        var llmState = settings.Llm.Enabled ? "有効" : "無効 (llm.enabled=false / 全モード未整形)";
-        HotkeyHelpText.Text =
-            $"ホットキー(押して録音開始、もう一度押して停止) / LLM整形: {llmState}\n" +
-            $"  {settings.Hotkeys.NoFormat} : NoFormat(最速・整形なし)\n" +
-            $"  {settings.Hotkeys.PlainFast} : PlainFast(軽量整形) / " +
-            $"{settings.Hotkeys.PlainQuality} : PlainQuality(高品質)\n" +
-            $"  {settings.Hotkeys.Polite} : Polite / {settings.Hotkeys.Memo} : Memo / " +
-            $"{settings.Hotkeys.Bullet} : Bullet / {settings.Hotkeys.DevInstruction} : DevInstruction";
+        HotkeyHelpText.Text = UserFacingText.OperationGuide(
+            settings.Hotkeys, settings.Llm.Enabled, settings.SelectionEdit.ParsedMode);
     }
 
     public void UpdateStage(PipelineStage stage, string? message)
     {
-        SetStatus(stage switch
+        if (UserFacingText.ForStage(stage, _controller.ActiveMode, message) is { } status)
         {
-            PipelineStage.Recording => $"録音中… ({_controller.ActiveMode})",
-            PipelineStage.Transcribing => "文字起こし中…",
-            PipelineStage.Formatting => "Gemma 4 で整形中…",
-            PipelineStage.Outputting => "出力中…",
-            PipelineStage.Completed => message is null ? "完了" : $"完了({message})",
-            PipelineStage.Failed => $"失敗: {message}",
-            _ => StatusText.Text,
-        });
+            SetStatus(status);
+        }
+
+        RefreshActionAvailability();
     }
 
     public void UpdateResult(PipelineResult result)
@@ -59,185 +74,182 @@ public partial class MainWindow : Window
         {
             SetLatestResult(result.Text);
             RejectedResultText.Text = "";
-            ReformatButton.IsEnabled = true;
-            AdoptRejectedButton.IsEnabled = false;
-            RecopyButton.IsEnabled = true;
-            RepasteButton.IsEnabled = true;
-            if (result.BackgroundFormattingStarted)
-            {
-                SetStatus("raw貼り付け済み・バックグラウンドで整形中…");
-            }
         }
-        else
-        {
-            SetStatus($"失敗: {result.ErrorMessage}");
-        }
+
+        SetStatus(UserFacingText.ForResult(result));
+        RefreshActionAvailability();
     }
 
-    /// <summary>バックグラウンド整形の完了 (成功時は直近結果を整形テキストへ更新)。</summary>
+    /// <summary>バックグラウンド整形の完了 (成功時は直近の結果を整形結果へ更新)。</summary>
     public void UpdateBackgroundFormatting(BackgroundFormattingResult result)
     {
         if (result.FormattedText is { } formatted)
         {
             SetLatestResult(formatted);
             RejectedResultText.Text = "";
-            ReformatButton.IsEnabled = true;
-            AdoptRejectedButton.IsEnabled = false;
-            RecopyButton.IsEnabled = true;
-            RepasteButton.IsEnabled = true;
-            SetStatus("整形完了・コピーまたは直前の入力先への貼り付けができます");
+        }
+        else if (result.RejectedText is { } rejected)
+        {
+            SetRejectedResult(rejected);
         }
         else
         {
-            if (result.RejectedText is { } rejected)
-            {
-                SetRejectedResult(rejected);
-                AdoptRejectedButton.IsEnabled = true;
-            }
-
-            SetStatus(FormatBackgroundFormattingFailure(result.ErrorMessage));
-        }
-    }
-
-    private static string FormatBackgroundFormattingFailure(string? errorMessage)
-    {
-        const string discardedPrefix = "整形結果を破棄しました:";
-        if (errorMessage?.StartsWith(discardedPrefix, StringComparison.Ordinal) == true)
-        {
-            var reason = errorMessage[discardedPrefix.Length..].Trim();
-            return $"整形結果は採用しませんでした ({ToDisplayReason(reason)})。候補を確認して手動採用できます";
+            // The controller holds no candidate now; do not keep showing one that cannot be adopted.
+            RejectedResultText.Text = "";
         }
 
-        return $"バックグラウンド整形失敗 (raw貼り付け済み): {errorMessage}";
+        SetStatus(UserFacingText.ForBackgroundFormatting(result));
+        RefreshActionAvailability();
     }
-
-    private static string ToDisplayReason(string reason)
-        => reason switch
-        {
-            "markdown_structure" => "見出し・箇条書きなどの形式が混入",
-            "heading_or_label" => "見出し・ラベルが混入",
-            "request_phrase_removed" => "文末表現が変化",
-            "time_range_changed" => "時刻範囲表現が変化",
-            "added_forbidden_verb" => "原文にない動詞が追加",
-            "uncertain_time_guessed" => "不確実な時刻を断定補正",
-            _ => reason,
-        };
 
     /// <summary>ホットキー登録結果を画面に表示する (失敗キーは後からここで確認できる)。</summary>
-    public void ShowHotkeyReport(HotkeyRegistrationReport report)
+    /// <param name="actions">Extra action hotkeys (selected-text editing); their failures use the same line format.</param>
+    public void ShowHotkeyReport(HotkeyRegistrationReport report, IReadOnlyList<HotkeyActionRegistration>? actions = null)
     {
-        if (!report.HasFailures)
+        var lines = report.Failed.Select(UserFacingText.HotkeyFailureLine)
+            .Concat((actions ?? []).Where(action => action.Failed).Select(UserFacingText.HotkeyFailureLine))
+            .ToList();
+        if (lines.Count == 0)
         {
             return;
         }
 
-        HotkeyHelpText.Text +=
-            "\n⚠ 登録失敗 (無効): " +
-            string.Join(" / ", report.Failed.Select(f => $"{f.Mode}: {f.HotkeyText} ({f.Reason})"));
+        HotkeyHelpText.Text += "\n" + string.Join("\n", lines);
     }
 
-    public async Task RecopyAsync()
-    {
-        if (_controller.LastResult is { } text)
-        {
-            await _output.OutputAsync(text, OutputMode.ClipboardOnly, CancellationToken.None);
-            SetStatus("直近結果をクリップボードへコピーしました");
-        }
-    }
+    /// <summary>Which result actions can run now (shared by the buttons and the tray menu).</summary>
+    internal ActionAvailability GetActionAvailability() => ActionAvailability.From(_controller);
 
-    public async Task RepasteAsync()
+    // One public entry per action. The button click handlers and the tray menu both call these;
+    // each reports its result through In-App Feedback and never throws.
+
+    public async Task CopyLatestAsync()
     {
-        if (_controller.LastResult is { } text)
+        try
         {
-            if (!_foregroundWindowTracker.TryRestoreLastExternalWindow())
+            if (_controller.LastResult is { } text)
             {
                 await _output.OutputAsync(text, OutputMode.ClipboardOnly, CancellationToken.None);
-                SetStatus("貼り付け先を特定できませんでした。直近結果はクリップボードへコピー済みです");
-                return;
+                ShowFeedback(new InAppFeedback(InAppFeedbackKind.Success, InAppFeedbackMessages.CopySucceeded));
             }
-
-            await _output.OutputAsync(text, OutputMode.ClipboardAndPaste, CancellationToken.None);
-        }
-    }
-
-    public void ReformatLast()
-    {
-        var mode = _controller.ReformatLast();
-        if (mode is not null)
-        {
-            SetStatus(mode == FormattingMode.PlainQuality
-                ? "直近のraw結果を高品質モードで再整形中…"
-                : "直近のraw結果をバックグラウンドで再整形中…");
-        }
-        else
-        {
-            SetStatus("再整形できるraw結果がありません");
-        }
-    }
-
-    public void AdoptRejectedResult()
-    {
-        if (_controller.AdoptRejectedFormattedResult())
-        {
-            SetLatestResult(_controller.LastResult ?? "");
-            RejectedResultText.Text = "";
-            AdoptRejectedButton.IsEnabled = false;
-            RecopyButton.IsEnabled = true;
-            RepasteButton.IsEnabled = true;
-            SetStatus("不採用候補を手動採用しました。コピーまたは貼り付けできます");
-        }
-        else
-        {
-            SetStatus("手動採用できる候補がありません");
-        }
-    }
-
-    private async void RecopyButton_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            await RecopyAsync();
         }
         catch (Exception ex)
         {
-            SetStatus($"コピー失敗: {ex.Message}");
+            // Exception text goes to the debug log only, never to the UI.
+            Debug.WriteLine($"[MainWindow] Copy failed: {ex}");
+            ShowFeedback(new InAppFeedback(InAppFeedbackKind.Error, InAppFeedbackMessages.CopyFailed));
+        }
+        finally
+        {
+            RefreshActionAvailability();
         }
     }
+
+    public async Task PasteLatestToPreviousTargetAsync()
+    {
+        try
+        {
+            if (_controller.LastResult is { } text)
+            {
+                if (!_foregroundWindowTracker.TryRestoreLastExternalWindow())
+                {
+                    await _output.OutputAsync(text, OutputMode.ClipboardOnly, CancellationToken.None);
+                    ShowFeedback(new InAppFeedback(InAppFeedbackKind.Warning, InAppFeedbackMessages.RepasteTargetNotFound));
+                    return;
+                }
+
+                await _output.OutputAsync(text, OutputMode.ClipboardAndPaste, CancellationToken.None);
+                ShowFeedback(new InAppFeedback(InAppFeedbackKind.Success, InAppFeedbackMessages.RepasteSucceeded));
+            }
+        }
+        catch (Exception ex)
+        {
+            // Exception text goes to the debug log only, never to the UI.
+            Debug.WriteLine($"[MainWindow] Repaste failed: {ex}");
+            ShowFeedback(new InAppFeedback(InAppFeedbackKind.Error, InAppFeedbackMessages.RepasteFailed));
+        }
+        finally
+        {
+            RefreshActionAvailability();
+        }
+    }
+
+    public void StartReformat()
+    {
+        try
+        {
+            if (_controller.ReformatLast() is { } startedMode)
+            {
+                // Reformatting continues in the background, so StatusText keeps this state text.
+                SetStatus(UserFacingText.ForReformatStarted(startedMode));
+                ShowFeedback(new InAppFeedback(InAppFeedbackKind.Info, InAppFeedbackMessages.ReformatStarted));
+            }
+            else
+            {
+                ShowFeedback(new InAppFeedback(InAppFeedbackKind.Warning, InAppFeedbackMessages.ReformatNotStarted));
+            }
+        }
+        catch (Exception ex)
+        {
+            // Exception text goes to the debug log only, never to the UI.
+            Debug.WriteLine($"[MainWindow] Reformat failed: {ex}");
+            ShowFeedback(new InAppFeedback(InAppFeedbackKind.Error, InAppFeedbackMessages.ReformatFailed));
+        }
+        finally
+        {
+            RefreshActionAvailability();
+        }
+    }
+
+    public void AdoptCandidate()
+    {
+        try
+        {
+            if (_controller.AdoptRejectedFormattedResult())
+            {
+                SetLatestResult(_controller.LastResult ?? "");
+                RejectedResultText.Text = "";
+                SetStatus(UserFacingText.StatusCandidateAdopted);
+                ShowFeedback(new InAppFeedback(InAppFeedbackKind.Success, InAppFeedbackMessages.CandidateAdopted));
+            }
+            else
+            {
+                ShowFeedback(new InAppFeedback(InAppFeedbackKind.Warning, InAppFeedbackMessages.NoCandidateToAdopt));
+            }
+        }
+        catch (Exception ex)
+        {
+            // Exception text goes to the debug log only, never to the UI.
+            Debug.WriteLine($"[MainWindow] Adopt failed: {ex}");
+            ShowFeedback(new InAppFeedback(InAppFeedbackKind.Error, InAppFeedbackMessages.AdoptFailed));
+        }
+        finally
+        {
+            RefreshActionAvailability();
+        }
+    }
+
+    // The entries never throw, so these handlers cannot raise an unhandled exception.
+    private async void RecopyButton_Click(object sender, RoutedEventArgs e)
+        => await CopyLatestAsync();
 
     private async void RepasteButton_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            await RepasteAsync();
-        }
-        catch (Exception ex)
-        {
-            SetStatus($"貼り付け失敗: {ex.Message}");
-        }
-    }
+        => await PasteLatestToPreviousTargetAsync();
 
     private void ReformatButton_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            ReformatLast();
-        }
-        catch (Exception ex)
-        {
-            SetStatus($"再整形開始失敗: {ex.Message}");
-        }
-    }
+        => StartReformat();
 
     private void AdoptRejectedButton_Click(object sender, RoutedEventArgs e)
+        => AdoptCandidate();
+
+    /// <summary>Enables each result action only when it can run now (same meaning as the tray menu).</summary>
+    private void RefreshActionAvailability()
     {
-        try
-        {
-            AdoptRejectedResult();
-        }
-        catch (Exception ex)
-        {
-            SetStatus($"手動採用失敗: {ex.Message}");
-        }
+        var availability = GetActionAvailability();
+        RecopyButton.IsEnabled = availability.CanCopy;
+        RepasteButton.IsEnabled = availability.CanRepaste;
+        ReformatButton.IsEnabled = availability.CanReformat;
+        AdoptRejectedButton.IsEnabled = availability.CanAdopt;
     }
 
     /// <summary>
@@ -301,6 +313,133 @@ public partial class MainWindow : Window
         UiMotion.SubtleUpdate(StatusText);
     }
 
+    /// <summary>
+    /// Shows the result of an operation the user just performed. The latest feedback wins:
+    /// a visible snackbar is updated in place, a hiding one recovers without re-entering.
+    /// Never moves focus or activates the window.
+    /// </summary>
+    private void ShowFeedback(InAppFeedback feedback)
+    {
+        var transition = _feedbackState.Show(feedback);
+
+        FeedbackGlyph.Text = feedback.Glyph;
+        FeedbackGlyphBackground.Fill = (Brush)FindResource(feedback.GlyphBrushKey);
+        FeedbackText.Text = feedback.Message;
+
+        _feedbackTimer.Stop();
+        _feedbackTimer.Interval = feedback.Duration;
+        _feedbackTimer.Start();
+
+        switch (transition)
+        {
+            case FeedbackTransition.Enter:
+                StopFeedbackMotion();
+                UiMotion.Stop(FeedbackText);
+                FeedbackHost.Opacity = 0;
+                FeedbackTranslate.Y = (double)FindResource("MotionRevealOffset");
+                FeedbackHost.Visibility = Visibility.Visible;
+                AnimateFeedback(
+                    opacity: 1,
+                    translateY: 0,
+                    GetMotionDuration("MotionNormalDuration"),
+                    (IEasingFunction)FindResource("MotionEaseOut"),
+                    onCompleted: null);
+                break;
+            case FeedbackTransition.UpdateInPlace:
+                // Content changes immediately; the snackbar itself does not replay its entrance.
+                UiMotion.SubtleUpdate(FeedbackText);
+                break;
+            case FeedbackTransition.RecoverFromHiding:
+                // Freeze the hide at the displayed values and return to visible from there.
+                StopFeedbackMotion();
+                FeedbackHost.Visibility = Visibility.Visible;
+                AnimateFeedback(
+                    opacity: 1,
+                    translateY: 0,
+                    GetMotionDuration("MotionFastDuration"),
+                    (IEasingFunction)FindResource("MotionEaseOut"),
+                    onCompleted: null);
+                break;
+        }
+
+        if (AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged))
+        {
+            UIElementAutomationPeer.CreatePeerForElement(FeedbackText)
+                ?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        }
+    }
+
+    private void HideFeedback()
+    {
+        _feedbackTimer.Stop();
+        if (!_feedbackState.BeginHide())
+        {
+            return;
+        }
+
+        var hideVersion = _feedbackState.Version;
+        AnimateFeedback(
+            opacity: 0,
+            translateY: FeedbackHideOffset,
+            GetMotionDuration("MotionNormalDuration"),
+            (IEasingFunction)FindResource("MotionEaseInOut"),
+            onCompleted: () =>
+            {
+                // A newer feedback shown during the hide makes this completion stale.
+                if (_feedbackState.CompleteHide(hideVersion))
+                {
+                    FeedbackHost.Visibility = Visibility.Collapsed;
+                }
+            });
+    }
+
+    private void AnimateFeedback(
+        double opacity,
+        double translateY,
+        Duration duration,
+        IEasingFunction? easing,
+        Action? onCompleted)
+    {
+        var version = ++_feedbackMotionVersion;
+
+        // No From values: each animation continues from the currently displayed value.
+        var opacityAnimation = new DoubleAnimation(opacity, duration) { EasingFunction = easing };
+        opacityAnimation.Completed += (_, _) =>
+        {
+            if (version != _feedbackMotionVersion)
+            {
+                return;
+            }
+
+            SetFeedbackValuesWithoutClocks(opacity, translateY);
+            onCompleted?.Invoke();
+        };
+
+        FeedbackHost.BeginAnimation(OpacityProperty, opacityAnimation);
+        FeedbackTranslate.BeginAnimation(
+            TranslateTransform.YProperty,
+            new DoubleAnimation(translateY, duration) { EasingFunction = easing });
+    }
+
+    /// <summary>Cancels any feedback motion (including hide) and freezes it at the displayed values.</summary>
+    private void StopFeedbackMotion()
+    {
+        _feedbackMotionVersion++;
+        SetFeedbackValuesWithoutClocks(FeedbackHost.Opacity, FeedbackTranslate.Y);
+    }
+
+    private void SetFeedbackValuesWithoutClocks(double opacity, double translateY)
+    {
+        FeedbackHost.BeginAnimation(OpacityProperty, null);
+        FeedbackTranslate.BeginAnimation(TranslateTransform.YProperty, null);
+        FeedbackHost.Opacity = opacity;
+        FeedbackTranslate.Y = translateY;
+    }
+
+    // Motion tokens are app resources (Themes/Motion.xaml); no duration literals here.
+    private Duration GetMotionDuration(string key)
+        => (Duration)FindResource(key);
+
     private void SetLatestResult(string text)
     {
         LastResultText.Text = text;
@@ -322,7 +461,7 @@ public partial class MainWindow : Window
     protected override void OnClosing(CancelEventArgs e)
     {
         base.OnClosing(e);
-        _foregroundWindowTracker.Dispose();
+        _feedbackTimer.Stop();
         if (!Application.Current.Dispatcher.HasShutdownStarted)
         {
             Application.Current.Shutdown();

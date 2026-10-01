@@ -6,7 +6,9 @@
         SizeToContent="WidthAndHeight" ResizeMode="NoResize"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         Focusable="False" IsHitTestVisible="False">
+    <!-- OverlayShadowInset: transparent, click-through room so OverlayShadowEffect is not clipped by the window edges. -->
     <Grid x:Name="OverlayRoot"
+          Margin="{StaticResource OverlayShadowInset}"
           Opacity="0"
           RenderTransformOrigin="0.5,0.5"
           IsHitTestVisible="False">
@@ -97,12 +99,28 @@
                            Style="{StaticResource OverlayPrimaryTextStyle}"
                            Text="処理中"/>
 
-                <TextBlock Grid.Column="2"
-                           x:Name="ElapsedText"
-                           Margin="12,0,0,0"
-                           Text="00:00"
-                           Visibility="Collapsed"
-                           Style="{StaticResource OverlayTimerTextStyle}"/>
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <!-- Volume-linked meter: Recording only, heights set from code per level update (no timer, no Storyboard). -->
+                    <StackPanel x:Name="LevelMeter"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                Height="{StaticResource LevelMeterMaxBarHeight}"
+                                Margin="10,0,0,0"
+                                Visibility="Collapsed">
+                        <Rectangle x:Name="LevelBar1" Width="3" Height="{StaticResource LevelMeterMinBarHeight}" RadiusX="1.5" RadiusY="1.5" Margin="0,0,2,0" VerticalAlignment="Center" Fill="{StaticResource RecordingBrush}"/>
+                        <Rectangle x:Name="LevelBar2" Width="3" Height="{StaticResource LevelMeterMinBarHeight}" RadiusX="1.5" RadiusY="1.5" Margin="0,0,2,0" VerticalAlignment="Center" Fill="{StaticResource RecordingBrush}"/>
+                        <Rectangle x:Name="LevelBar3" Width="3" Height="{StaticResource LevelMeterMinBarHeight}" RadiusX="1.5" RadiusY="1.5" Margin="0,0,2,0" VerticalAlignment="Center" Fill="{StaticResource RecordingBrush}"/>
+                        <Rectangle x:Name="LevelBar4" Width="3" Height="{StaticResource LevelMeterMinBarHeight}" RadiusX="1.5" RadiusY="1.5" VerticalAlignment="Center" Fill="{StaticResource RecordingBrush}"/>
+                    </StackPanel>
+
+                    <TextBlock x:Name="ElapsedText"
+                               Margin="12,0,0,0"
+                               Text="00:00"
+                               Visibility="Collapsed"
+                               Style="{StaticResource OverlayTimerTextStyle}"/>
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>

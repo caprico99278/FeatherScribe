@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using FeatherScribe.Core;
 
@@ -6,68 +7,153 @@ namespace FeatherScribe.Infrastructure;
 /// <summary>
 /// クリップボードへコピーし、必要なら Ctrl+V をアクティブウィンドウへ送信する。
 /// クリップボードは他プロセスがロックしている場合があるためリトライする。
+/// output.restoreClipboard が true の場合、貼り付け後に元のクリップボード内容を復元する
+/// (クリップボードがその間に他から変更されていれば復元しない)。
 /// </summary>
 public sealed class ClipboardTextOutput : ITextOutput
 {
+    /// <summary>Paste boundary: how long the target app gets to read the clipboard before it is restored.</summary>
+    internal static readonly TimeSpan RestoreDelay = TimeSpan.FromMilliseconds(600);
+
     private readonly OutputSettings _settings;
+    private readonly IClipboardAccess _clipboard;
+    private readonly Action _sendPaste;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+
+    // Only used when restoreClipboard is on: a second output must not capture FeatherScribe's previous
+    // text as the "original" while that output's restore is still pending.
+    private readonly SemaphoreSlim _restoreGate = new(1, 1);
 
     public ClipboardTextOutput(OutputSettings settings)
+        : this(settings, new WpfClipboardAccess(), KeyboardInput.SendCtrlV, Task.Delay)
     {
+    }
+
+    internal ClipboardTextOutput(
+        OutputSettings settings,
+        IClipboardAccess clipboard,
+        Action sendPaste,
+        Func<TimeSpan, CancellationToken, Task> delay)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(clipboard);
+        ArgumentNullException.ThrowIfNull(sendPaste);
+        ArgumentNullException.ThrowIfNull(delay);
         _settings = settings;
+        _clipboard = clipboard;
+        _sendPaste = sendPaste;
+        _delay = delay;
     }
 
     public async Task OutputAsync(string text, OutputMode mode, CancellationToken cancellationToken)
     {
-        await RunOnStaThreadAsync(() => SetClipboardTextWithRetry(text)).ConfigureAwait(false);
-
-        if (mode == OutputMode.ClipboardAndPaste)
+        if (!_settings.RestoreClipboard)
         {
-            await Task.Delay(Math.Max(0, _settings.PasteDelayMilliseconds), cancellationToken)
-                .ConfigureAwait(false);
-            KeyboardInput.SendCtrlV();
-        }
-    }
+            // Existing behavior, unchanged: set text, wait pasteDelay, Ctrl+V. No capture, no lock, no restore.
+            await _clipboard.SetTextAsync(text).ConfigureAwait(false);
 
-    private static void SetClipboardTextWithRetry(string text)
-    {
-        const int maxAttempts = 10;
-        for (var attempt = 1; ; attempt++)
-        {
-            try
+            if (mode == OutputMode.ClipboardAndPaste)
             {
-                System.Windows.Clipboard.SetDataObject(text, copy: true);
+                await _delay(PasteDelay, cancellationToken).ConfigureAwait(false);
+                _sendPaste();
+            }
+
+            return;
+        }
+
+        await _restoreGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!ClipboardRestorePolicy.ShouldCapture(_settings.RestoreClipboard, mode))
+            {
+                // ClipboardOnly: the text is meant to stay on the clipboard.
+                await _clipboard.SetTextAsync(text).ConfigureAwait(false);
                 return;
             }
-            catch (COMException) when (attempt < maxAttempts)
-            {
-                Thread.Sleep(50);
-            }
+
+            await OutputWithRestoreAsync(text, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _restoreGate.Release();
         }
     }
 
-    private static Task RunOnStaThreadAsync(Action action)
+    private TimeSpan PasteDelay => TimeSpan.FromMilliseconds(Math.Max(0, _settings.PasteDelayMilliseconds));
+
+    private async Task OutputWithRestoreAsync(string text, CancellationToken cancellationToken)
     {
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
+        var snapshot = await _clipboard.CaptureSnapshotAsync().ConfigureAwait(false);
+        if (snapshot.Kind == SnapshotKind.Unsupported)
         {
-            try
-            {
-                action();
-                tcs.SetResult();
-            }
-            catch (Exception ex)
-            {
-                tcs.SetException(ex);
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.IsBackground = true;
-        thread.Start();
-        return tcs.Task;
+            Log($"clipboard_snapshot_unsupported reason={snapshot.UnsupportedReason}");
+        }
+
+        var expectedSequence = await _clipboard.SetTextAndGetSequenceAsync(text).ConfigureAwait(false);
+
+        try
+        {
+            await _delay(PasteDelay, cancellationToken).ConfigureAwait(false);
+            _sendPaste();
+        }
+        catch (Exception ex)
+        {
+            // The text was not pasted: give the user their clipboard back right away, then report the failure.
+            Log($"clipboard_paste_failed error={ex.GetType().Name}");
+            await TryRestoreAsync(snapshot, expectedSequence, pasteSent: false).ConfigureAwait(false);
+            throw;
+        }
+
+        if (snapshot.Kind == SnapshotKind.Unsupported)
+        {
+            // Nothing to restore: keep the existing behavior for this run (no extra wait).
+            Log("clipboard_restore_skipped_unsupported");
+            return;
+        }
+
+        // The paste already happened, so the restore must not be abandoned on cancellation.
+        await _delay(RestoreDelay, CancellationToken.None).ConfigureAwait(false);
+        await TryRestoreAsync(snapshot, expectedSequence, pasteSent: true).ConfigureAwait(false);
     }
+
+    private async Task TryRestoreAsync(ClipboardSnapshot snapshot, uint expectedSequence, bool pasteSent)
+    {
+        try
+        {
+            var decision = ClipboardRestorePolicy.Decide(
+                pasteSent,
+                expectedSequence,
+                _clipboard.GetSequenceNumber(),
+                snapshot.Kind);
+
+            switch (decision)
+            {
+                case RestoreDecision.RestoreNow:
+                    var restored = await _clipboard.RestoreAsync(snapshot, expectedSequence).ConfigureAwait(false);
+                    Log(restored
+                        ? $"clipboard_restored kind={snapshot.Kind} formats={snapshot.FormatCount} pasteSent={pasteSent}"
+                        : "clipboard_restore_skipped_changed");
+                    break;
+                case RestoreDecision.SkipChanged:
+                    Log("clipboard_restore_skipped_changed");
+                    break;
+                default:
+                    Log("clipboard_restore_skipped_unsupported");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            // A failed restore must not turn a successful paste into an error (or mask the paste error).
+            Log($"clipboard_restore_failed error={ex.GetType().Name}");
+        }
+    }
+
+    // Metadata only: decision, kind, format count, exception type. Never clipboard content.
+    private static void Log(string message) => Debug.WriteLine($"[ClipboardTextOutput] {message}");
 }
 
-/// <summary>SendInput による Ctrl+V 送信。</summary>
+/// <summary>SendInput による Ctrl+V / Ctrl+C 送信。</summary>
 internal static class KeyboardInput
 {
     private const int InputKeyboard = 1;
@@ -77,9 +163,14 @@ internal static class KeyboardInput
     private const ushort VkControl = 0x11;
     private const ushort VkMenu = 0x12; // Alt
     private const ushort VkLWin = 0x5B;
+    private const ushort VkC = 0x43;
     private const ushort VkV = 0x56;
 
-    public static void SendCtrlV()
+    public static void SendCtrlV() => SendCtrlChord(VkV, "Ctrl+V");
+
+    public static void SendCtrlC() => SendCtrlChord(VkC, "Ctrl+C");
+
+    private static void SendCtrlChord(ushort key, string name)
     {
         // ホットキー由来の修飾キーが押されたままだと Ctrl+V が化けるため、先に解放を送る
         var inputs = new[]
@@ -89,8 +180,8 @@ internal static class KeyboardInput
             KeyUp(VkLWin),
             KeyUp(VkControl),
             KeyDown(VkControl),
-            KeyDown(VkV),
-            KeyUp(VkV),
+            KeyDown(key),
+            KeyUp(key),
             KeyUp(VkControl),
         };
 
@@ -98,7 +189,7 @@ internal static class KeyboardInput
         if (sent != inputs.Length)
         {
             throw new InvalidOperationException(
-                $"Ctrl+V の送信に失敗しました (SendInput: {sent}/{inputs.Length}, Win32Error: {Marshal.GetLastWin32Error()})");
+                $"{name} の送信に失敗しました (SendInput: {sent}/{inputs.Length}, Win32Error: {Marshal.GetLastWin32Error()})");
         }
     }
 

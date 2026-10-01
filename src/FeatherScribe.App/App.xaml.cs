@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Net.Http;
 using System.Windows;
+using System.Windows.Threading;
 using FeatherScribe.Core;
 using FeatherScribe.Infrastructure;
 
@@ -10,6 +12,9 @@ namespace FeatherScribe.App;
 /// </summary>
 public partial class App : Application
 {
+    // Identifier (not user-facing) of the selected-text editing hotkey in logs and the startup tray notice.
+    private const string EditSelectionActionId = "EditSelection";
+
     private HttpClient? _httpClient;
     private HotkeyService? _hotkeyService;
     private TrayIconService? _trayIconService;
@@ -17,6 +22,14 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private DictationPipeline? _pipeline;
     private FileEventLog? _eventLog;
+    private ForegroundWindowTracker? _foregroundWindowTracker;
+    private NAudioRecorder? _recorder;
+    private SelectionEditService? _selectionEditService;
+
+    // Recording meter coalescing: the audio thread stores only the latest level and posts
+    // at most one pending UI update at a time (visual_direction.md §24).
+    private float _latestAudioLevel;
+    private int _levelUpdatePending;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -29,31 +42,69 @@ public partial class App : Application
         var dictionaryProvider = new JsonDictionaryProvider(rootPath);
         _httpClient = new HttpClient();
 
+        // One tracker for the whole app: the explicit repaste and the pipeline paste guard
+        // share the same "previous input target".
+        var foregroundWindowTracker = new ForegroundWindowTracker();
+        _foregroundWindowTracker = foregroundWindowTracker;
+
         var textOutput = new ClipboardTextOutput(settings.Output);
-        _eventLog = new FileEventLog(rootPath);
-        _pipeline = new DictationPipeline(
-            new NAudioRecorder(settings.Recording),
-            new WhisperCppTranscriptionEngine(settings.Asr),
-            new OllamaGemmaFormatter(_httpClient, settings.Llm, new FilePromptProvider(rootPath), _eventLog),
-            new DictionaryCorrector(dictionaryProvider.Load()),
+
+        // The pipeline never sends Ctrl+V into FeatherScribe's own window (e.g. MainWindow opened
+        // while recording). MainWindow keeps the inner output for its explicit repaste path,
+        // which restores the target itself.
+        var pipelineOutput = new PasteTargetGuardTextOutput(
             textOutput,
+            isOwnProcessForeground: () => Dispatcher.Invoke(() => ForegroundWindowTracker.IsCurrentProcessForeground()),
+            tryRestoreExternalTarget: () => Dispatcher.Invoke(() => foregroundWindowTracker.TryRestoreLastExternalWindow()));
+
+        _eventLog = new FileEventLog(rootPath);
+        _recorder = new NAudioRecorder(settings.Recording);
+
+        // Shared by the dictation pipeline and selected-text editing (same prompts, validator and timeouts).
+        var formatter = new OllamaGemmaFormatter(_httpClient, settings.Llm, new FilePromptProvider(rootPath), _eventLog);
+        _pipeline = new DictationPipeline(
+            _recorder,
+            new WhisperCppTranscriptionEngine(settings.Asr),
+            formatter,
+            new DictionaryCorrector(dictionaryProvider.Load()),
+            pipelineOutput,
             dictionaryProvider,
             _eventLog,
             settings);
 
         var controller = new DictationController(_pipeline, settings);
 
-        _overlay = new RecordingOverlay();
-        _mainWindow = new MainWindow(controller, settings, textOutput);
+        // The overlay reads the tracker's last external window to appear on the input target's monitor.
+        _overlay = new RecordingOverlay(foregroundWindowTracker);
+        _mainWindow = new MainWindow(controller, settings, textOutput, foregroundWindowTracker);
         _trayIconService = new TrayIconService(_mainWindow);
         _hotkeyService = new HotkeyService();
 
         WireEvents(_pipeline, controller);
+        _recorder.AudioLevelChanged += OnAudioLevelChanged;
+
+        // Selected-text editing (Phase UX-1): its own clipboard restore, independent of output.restoreClipboard.
+        _selectionEditService = new SelectionEditService(
+            new WpfClipboardAccess(),
+            new SystemSelectionKeyboard(),
+            formatter,
+            dictionaryProvider,
+            SystemForegroundWindow.Get,
+            ForegroundWindowTracker.IsCurrentProcessForeground,
+            () => controller.IsBusy,
+            settings,
+            eventLog: _eventLog);
+        _selectionEditService.FormattingStarted += () => Dispatcher.InvokeAsync(() =>
+            _overlay?.ShowPresentation(OverlayPresentationMapper.FromSelectionEditFormatting()));
 
         // 登録失敗は該当キーのみ無効化し、起動は必ず継続する (指示書002 §2)
         var hotkeyReport = _hotkeyService.RegisterFromSettings(settings.Hotkeys, controller.Toggle);
+        var editSelectionHotkey = _hotkeyService.RegisterAction(
+            UserFacingText.SelectionEditActionLabel,
+            settings.Hotkeys.EditSelection,
+            () => _ = RunSelectionEditAsync());
 
-        _mainWindow.ShowHotkeyReport(hotkeyReport);
+        _mainWindow.ShowHotkeyReport(hotkeyReport, [editSelectionHotkey]);
         _mainWindow.Show();
 
         if (settingsProvider.LastWarnings.Count > 0)
@@ -77,7 +128,7 @@ public partial class App : Application
                 $"既定値で起動しました: {settingsProvider.LastError}");
         }
 
-        if (hotkeyReport.HasFailures)
+        if (hotkeyReport.HasFailures || editSelectionHotkey.Failed)
         {
             foreach (var failure in hotkeyReport.Failed)
             {
@@ -87,10 +138,61 @@ public partial class App : Application
                     0, failure.Mode.ToString(), null, 0));
             }
 
+            var failureLines = hotkeyReport.Failed.Select(f => $"{f.Mode}: {f.HotkeyText} ({f.Reason})").ToList();
+            if (editSelectionHotkey.Failed)
+            {
+                _eventLog.Write(new PipelineEvent(
+                    DateTimeOffset.Now, "hotkey_register", false,
+                    $"{EditSelectionActionId}:{editSelectionHotkey.HotkeyText}:{editSelectionHotkey.FailureReason}",
+                    0, EditSelectionActionId, null, 0));
+                failureLines.Add($"{EditSelectionActionId}: {editSelectionHotkey.HotkeyText} ({editSelectionHotkey.FailureReason})");
+            }
+
             _trayIconService.Notify(
                 "一部ホットキー登録に失敗しました",
-                string.Join("\n", hotkeyReport.Failed.Select(f => $"{f.Mode}: {f.HotkeyText} ({f.Reason})")) +
+                string.Join("\n", failureLines) +
                 "\n該当キーのみ無効です。config/appsettings.json の hotkeys で変更できます。");
+        }
+    }
+
+    /// <summary>
+    /// Selection edit hotkey (UI thread). The service never throws and runs off the UI thread after its
+    /// guards; the outcome goes to the overlay and, when the user has something to act on, the tray.
+    /// </summary>
+    private async Task RunSelectionEditAsync()
+    {
+        if (_selectionEditService is not { } service)
+        {
+            return;
+        }
+
+        SelectionEditOutcome outcome;
+        try
+        {
+            outcome = await service.RunAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Not expected (the service maps every failure to an outcome); never crash the hotkey handler.
+            Debug.WriteLine($"[App] selection edit failed unexpectedly: {ex.GetType().Name}");
+            return;
+        }
+
+        try
+        {
+            await Dispatcher.InvokeAsync(() =>
+            {
+                _overlay?.ShowPresentation(OverlayPresentationMapper.FromSelectionEditOutcome(outcome));
+                if (UserFacingText.SelectionEditTrayNotice(outcome) is { } notice)
+                {
+                    _trayIconService?.Notify(notice.Title, notice.Body);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            // Dispatcher unavailable (shutting down).
+            Debug.WriteLine($"[App] selection edit notice failed: {ex.GetType().Name}");
         }
     }
 
@@ -112,22 +214,10 @@ public partial class App : Application
             _mainWindow!.UpdateResult(result);
             _overlay!.ShowPresentation(OverlayPresentationMapper.FromPipelineResult(result));
 
-            if (!result.Success)
+            // 失敗 → 貼り付け失敗 → 整形失敗(指示書§12.2) の順。StatusText / Overlay と同じ優先度。
+            if (UserFacingText.CompletionNotice(result) is { } notice)
             {
-                _trayIconService!.Notify("FeatherScribe エラー", result.ErrorMessage ?? "処理に失敗しました");
-            }
-            else if (result.UsedFallback)
-            {
-                // 指示書§12.2: 整形失敗/タイムアウトが分かる通知を出す
-                _trayIconService!.Notify(
-                    "整形失敗・未整形で貼り付け",
-                    result.ErrorMessage ?? "整形に失敗/タイムアウトしたため raw transcript を使用しました");
-            }
-            else if (!result.OutputSucceeded)
-            {
-                _trayIconService!.Notify(
-                    "貼り付け失敗",
-                    "結果はアプリ内に保持しています。メイン画面からクリップボードにコピーできます。");
+                _trayIconService!.Notify(notice.Title, notice.Body);
             }
         });
 
@@ -141,48 +231,63 @@ public partial class App : Application
             {
                 // 自動置換はしない。ユーザー操作 (コピー/貼り付け) でのみ利用可能。
                 _trayIconService!.Notify(
-                    "整形完了",
-                    "整形結果を「クリップボードにコピー」または「直前の入力先へ貼り付け」で利用できます(自動置換はしません)。");
+                    UserFacingText.NotifyBackgroundFormattedTitle,
+                    UserFacingText.NotifyBackgroundFormattedBody);
+            }
+            else if (UserFacingText.IsRejectedCandidate(result))
+            {
+                _trayIconService!.Notify(
+                    UserFacingText.NotifyBackgroundRejectedTitle,
+                    UserFacingText.NotifyBackgroundRejectedBody(result));
             }
             else
             {
-                var discarded = result.ErrorMessage?.StartsWith("整形結果を破棄しました:", StringComparison.Ordinal) == true;
                 _trayIconService!.Notify(
-                    discarded ? "整形結果は採用しませんでした" : "バックグラウンド整形に失敗しました",
-                    $"{FormatBackgroundFormattingFailure(result.ErrorMessage)}\nraw transcriptは貼り付け済みです。候補は画面で確認して手動採用できます。");
+                    UserFacingText.NotifyBackgroundFailedTitle,
+                    UserFacingText.NotifyBackgroundFailedBody);
             }
         });
     }
 
-    private static string FormatBackgroundFormattingFailure(string? errorMessage)
+    /// <summary>
+    /// Audio callback thread. Never blocks: stores the latest level and posts one UI update
+    /// only when none is pending, so updates never queue up behind a busy UI thread.
+    /// </summary>
+    private void OnAudioLevelChanged(float level)
     {
-        const string discardedPrefix = "整形結果を破棄しました:";
-        if (errorMessage?.StartsWith(discardedPrefix, StringComparison.Ordinal) == true)
+        Volatile.Write(ref _latestAudioLevel, level);
+        if (Interlocked.Exchange(ref _levelUpdatePending, 1) == 0)
         {
-            var reason = errorMessage[discardedPrefix.Length..].Trim();
-            return $"理由: {ToDisplayReason(reason)}";
+            try
+            {
+                Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(ApplyLatestAudioLevel));
+            }
+            catch (Exception)
+            {
+                // Dispatcher unavailable (shutting down): the meter just stays still.
+                Volatile.Write(ref _levelUpdatePending, 0);
+            }
         }
-
-        return errorMessage ?? "整形に失敗しました";
     }
 
-    private static string ToDisplayReason(string reason)
-        => reason switch
-        {
-            "markdown_structure" => "見出し・箇条書きなどの形式が混入",
-            "heading_or_label" => "見出し・ラベルが混入",
-            "request_phrase_removed" => "文末表現が変化",
-            "time_range_changed" => "時刻範囲表現が変化",
-            "added_forbidden_verb" => "原文にない動詞が追加",
-            "uncertain_time_guessed" => "不確実な時刻を断定補正",
-            _ => reason,
-        };
+    private void ApplyLatestAudioLevel()
+    {
+        // Reset first so a level arriving while this runs schedules the next update.
+        Volatile.Write(ref _levelUpdatePending, 0);
+        _overlay?.SetAudioLevel(Volatile.Read(ref _latestAudioLevel));
+    }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (_recorder is not null)
+        {
+            _recorder.AudioLevelChanged -= OnAudioLevelChanged;
+        }
+
         _hotkeyService?.Dispose();
         _trayIconService?.Dispose();
         _pipeline?.Dispose(); // 実行中のバックグラウンド整形を安全にキャンセル
+        _foregroundWindowTracker?.Dispose();
         _httpClient?.Dispose();
         base.OnExit(e);
     }

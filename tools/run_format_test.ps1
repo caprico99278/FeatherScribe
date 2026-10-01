@@ -45,6 +45,7 @@ $body = @{
     model    = $ModelTag
     messages = @(@{ role = "user"; content = $prompt })
     stream   = $false
+    think    = $false  # Thinking models (gemma4) otherwise spend the budget on hidden reasoning.
     options  = $options
 } | ConvertTo-Json -Depth 6
 
