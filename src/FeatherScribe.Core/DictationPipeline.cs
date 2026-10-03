@@ -15,6 +15,8 @@ public enum PipelineStage
 /// <param name="Text">出力(貼り付け)されたテキスト。失敗時も再コピー用に保持されることがある。</param>
 /// <param name="BackgroundFormattingStarted">raw先貼り付け後、整形をバックグラウンドで開始したか。
 /// 結果は <see cref="DictationPipeline.BackgroundFormattingCompleted"/> で通知される。</param>
+/// <param name="OutputErrorMessage">出力(貼り付け)失敗時の例外メッセージ。出力成功・未実行時は null。
+/// <paramref name="ErrorMessage"/> は整形メモ等で上書きされることがあるため、出力失敗の種類はこちらで判別する。</param>
 public sealed record PipelineResult(
     bool Success,
     string? Text,
@@ -22,7 +24,8 @@ public sealed record PipelineResult(
     bool UsedFallback,
     bool OutputSucceeded,
     string? ErrorMessage,
-    Guid OperationId = default);
+    Guid OperationId = default,
+    string? OutputErrorMessage = null);
 
 /// <param name="FormattedText">整形済みテキスト。失敗時は null。</param>
 public sealed record BackgroundFormattingResult(
@@ -127,7 +130,7 @@ public sealed class DictationPipeline : IDisposable
                     ? "LLM整形が無効設定 (llm.enabled=false) のため未整形で出力しました"
                     : null;
                 StageChanged?.Invoke(PipelineStage.Completed, note);
-                return new PipelineResult(true, corrected, false, false, ok, note ?? outputError, runId);
+                return new PipelineResult(true, corrected, false, false, ok, note ?? outputError, runId, outputError);
             }
 
             var request = new FormatRequest(corrected, mode, _dictionaryProvider.Load());
@@ -144,7 +147,7 @@ public sealed class DictationPipeline : IDisposable
 
                 QueueBackgroundFormatting(runId, request);
                 StageChanged?.Invoke(PipelineStage.Completed, "raw貼り付け完了・バックグラウンドで整形中");
-                return new PipelineResult(true, corrected, true, false, ok, outputError, runId);
+                return new PipelineResult(true, corrected, true, false, ok, outputError, runId, outputError);
             }
 
             // 5b. 整形してから出力 (Polite/Bullet/Memo/DevInstruction、またはrawFirst無効時)
@@ -171,7 +174,7 @@ public sealed class DictationPipeline : IDisposable
                 formatResult.UsedFallback ? "整形失敗・未整形で出力しました" : null);
             return new PipelineResult(
                 true, finalText, false, formatResult.UsedFallback, outputOk,
-                formatResult.ErrorMessage ?? finalOutputError, runId);
+                formatResult.ErrorMessage ?? finalOutputError, runId, finalOutputError);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

@@ -24,8 +24,10 @@ internal static class UserFacingText
     public const string StatusRawPastedFormatting = "未整形の文章を貼り付けました・整形中…";
     public const string StatusFallback = "整形できなかったため、未整形の文章を貼り付けました";
     public const string StatusOutputFailed = "貼り付けできませんでした・結果は画面に保持しています";
+    public const string StatusPasteTargetUnavailable = "貼り付け先が見つからないため、クリップボードにコピーしました";
     public const string StatusBackgroundFormatted = "整形完了・コピーまたは貼り付けできます";
     public const string StatusBackgroundFailed = "整形できませんでした・未整形の文章は貼り付け済みです";
+    public const string StatusBackgroundFailedRawNotPasted = "整形できませんでした・未整形の文章は画面に保持しています";
     public const string StatusReformatting = "再整形中…";
     public const string StatusReformattingQuality = "再整形中…（高品質）";
     public const string StatusCandidateAdopted = "整形候補を採用済み";
@@ -45,12 +47,14 @@ internal static class UserFacingText
     public const string NotifyFallbackBody = "未整形の文章を貼り付けました。";
     public const string NotifyOutputFailedTitle = "貼り付けできませんでした";
     public const string NotifyOutputFailedBody = "結果は画面に保持しています。画面からクリップボードにコピーできます。";
+    public const string NotifyPasteTargetUnavailableBody = "貼り付け先が見つからないため、クリップボードにコピーしました。";
     public const string NotifyBackgroundFormattedTitle = "整形完了";
     public const string NotifyBackgroundFormattedBody =
         "整形結果は「クリップボードにコピー」または「直前の入力先へ貼り付け」で使えます（自動では置き換えません）。";
     public const string NotifyBackgroundRejectedTitle = "整形候補があります";
     public const string NotifyBackgroundFailedTitle = "整形できませんでした";
     public const string NotifyBackgroundFailedBody = "未整形の文章は貼り付け済みです。";
+    public const string NotifyBackgroundFailedBodyRawNotPasted = "未整形の文章は画面に保持しています。";
 
     // --- Operation guide ---
     public const string GuideIntro = "キーを押して録音、もう一度押して停止します。";
@@ -146,9 +150,13 @@ internal static class UserFacingText
         }
 
         // A failed paste is reported first so the status never claims the text was pasted.
+        // Only the paste guard case says the clipboard holds the result: after any other output
+        // failure the clipboard may have been restored to the user's previous content.
         if (!result.OutputSucceeded)
         {
-            return StatusOutputFailed;
+            return PasteTargetUnavailableException.IsCauseOf(result)
+                ? StatusPasteTargetUnavailable
+                : StatusOutputFailed;
         }
 
         if (result.BackgroundFormattingStarted)
@@ -159,16 +167,21 @@ internal static class UserFacingText
         return result.UsedFallback ? StatusFallback : StatusCompleted;
     }
 
-    public static string ForBackgroundFormatting(BackgroundFormattingResult result)
+    /// <param name="rawPasted">True only when the raw output of the dictation this result belongs to is
+    /// known to have been pasted; false (also when unknown) never claims a paste.</param>
+    public static string ForBackgroundFormatting(BackgroundFormattingResult result, bool rawPasted)
     {
         if (result.FormattedText is not null)
         {
             return StatusBackgroundFormatted;
         }
 
-        return IsRejectedCandidate(result)
-            ? $"整形候補があります（{BackgroundDisplayReason(result)}）・確認して採用できます"
-            : StatusBackgroundFailed;
+        if (IsRejectedCandidate(result))
+        {
+            return $"整形候補があります（{BackgroundDisplayReason(result)}）・確認して採用できます";
+        }
+
+        return rawPasted ? StatusBackgroundFailed : StatusBackgroundFailedRawNotPasted;
     }
 
     public static string ForReformatStarted(FormattingMode mode)
@@ -200,7 +213,9 @@ internal static class UserFacingText
 
         if (!result.OutputSucceeded)
         {
-            return new TrayNotice(NotifyOutputFailedTitle, NotifyOutputFailedBody);
+            return new TrayNotice(
+                NotifyOutputFailedTitle,
+                PasteTargetUnavailableException.IsCauseOf(result) ? NotifyPasteTargetUnavailableBody : NotifyOutputFailedBody);
         }
 
         return result.UsedFallback
@@ -208,8 +223,16 @@ internal static class UserFacingText
             : null;
     }
 
-    public static string NotifyBackgroundRejectedBody(BackgroundFormattingResult result)
-        => $"理由: {BackgroundDisplayReason(result)}\n未整形の文章は貼り付け済みです。整形候補は画面で確認して採用できます。";
+    /// <param name="rawPasted">Same meaning as in <see cref="ForBackgroundFormatting"/>.</param>
+    public static string NotifyBackgroundRejectedBody(BackgroundFormattingResult result, bool rawPasted)
+    {
+        var state = rawPasted ? "貼り付け済みです" : "画面に保持しています";
+        return $"理由: {BackgroundDisplayReason(result)}\n未整形の文章は{state}。整形候補は画面で確認して採用できます。";
+    }
+
+    /// <param name="rawPasted">Same meaning as in <see cref="ForBackgroundFormatting"/>.</param>
+    public static string NotifyBackgroundFailedBodyFor(bool rawPasted)
+        => rawPasted ? NotifyBackgroundFailedBody : NotifyBackgroundFailedBodyRawNotPasted;
 
     /// <summary>
     /// Compact operation guide: one hotkey per line, the selected-text editing hotkey (omitted when it is

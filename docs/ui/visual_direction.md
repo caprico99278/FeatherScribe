@@ -670,17 +670,21 @@ Single source: `UserFacingText` in `src/FeatherScribe.App/UserFacingText.cs` hol
 | Completed stage | `完了` (the Core note message is not appended) |
 | Failed stage / failed result | `失敗しました: {short reason}` |
 | Result: paste failed | `貼り付けできませんでした・結果は画面に保持しています` |
+| Result: paste failed because no paste target was available (text copied to the clipboard) | `貼り付け先が見つからないため、クリップボードにコピーしました` |
 | Result: raw pasted, background formatting started | `未整形の文章を貼り付けました・整形中…` |
 | Result: formatting fallback | `整形できなかったため、未整形の文章を貼り付けました` |
 | Result: otherwise | `完了` |
 | Background formatting succeeded | `整形完了・コピーまたは貼り付けできます` |
 | Background formatting rejected by the validator | `整形候補があります（{display reason}）・確認して採用できます` |
-| Background formatting failed | `整形できませんでした・未整形の文章は貼り付け済みです` |
+| Background formatting failed (raw text pasted) | `整形できませんでした・未整形の文章は貼り付け済みです` |
+| Background formatting failed (raw paste failed or unknown) | `整形できませんでした・未整形の文章は画面に保持しています` |
 | Reformat started | `再整形中…（高品質）` for PlainQuality, otherwise `再整形中…` |
 | Candidate adopted | `整形候補を採用済み` |
 
 - `{short reason}` is the first line of the error message, trimmed, at most 80 characters followed by `…`; an empty message becomes `不明なエラー`.
 - A failed paste is checked before the raw-first state, so the status never says the text was pasted when it was not.
+- The no-paste-target text is used only when `PasteTargetGuardTextOutput` failed (`PipelineResult.OutputErrorMessage` is `paste target unavailable`, also the unchanged event log ErrorType): it copied the text to the clipboard first. Any other output failure keeps the generic text, because a failed Ctrl+V may have restored the user's clipboard.
+- Background results say `貼り付け済み` only when `DictationController` recorded that the raw output of that operation succeeded (a reformat uses the state of the dictation it reformats); a failed or unknown raw paste uses the `画面に保持しています` variant.
 
 ### Tray
 
@@ -689,9 +693,10 @@ Single source: `UserFacingText` in `src/FeatherScribe.App/UserFacingText.cs` hol
   - failure: `FeatherScribe エラー` / `失敗しました: {short reason}`
   - fallback: `整形できませんでした` / `未整形の文章を貼り付けました。`
   - paste failed: `貼り付けできませんでした` / `結果は画面に保持しています。画面からクリップボードにコピーできます。`
+  - paste failed, no paste target (text copied to the clipboard): `貼り付けできませんでした` / `貼り付け先が見つからないため、クリップボードにコピーしました。`
   - background success: `整形完了` / `整形結果は「クリップボードにコピー」または「直前の入力先へ貼り付け」で使えます（自動では置き換えません）。`
-  - background rejected: `整形候補があります` / `理由: {display reason}`, a line break, then `未整形の文章は貼り付け済みです。整形候補は画面で確認して採用できます。`
-  - background failed: `整形できませんでした` / `未整形の文章は貼り付け済みです。`
+  - background rejected: `整形候補があります` / `理由: {display reason}`, a line break, then `未整形の文章は貼り付け済みです。整形候補は画面で確認して採用できます。` (raw paste failed or unknown: `未整形の文章は画面に保持しています。整形候補は画面で確認して採用できます。`)
+  - background failed: `整形できませんでした` / `未整形の文章は貼り付け済みです。` (raw paste failed or unknown: `未整形の文章は画面に保持しています。`)
   - startup settings and hotkey notices: unchanged.
 - At dictation completion the notice is chosen by `UserFacingText.CompletionNotice` with the same priority as StatusText and the overlay: failure → paste failed → fallback. A successful raw-first result (background formatting started) shows no notice at completion; the background result notifies later.
 

@@ -468,7 +468,7 @@ public sealed class ThemeResourceTests
         Assert.Contains("SetStatus(UserFacingText.StatusCandidateAdopted);", code);
         Assert.Contains("SetStatus(UserFacingText.ForReformatStarted(startedMode));", code);
         Assert.Contains("SetStatus(UserFacingText.ForResult(result));", code);
-        Assert.Contains("SetStatus(UserFacingText.ForBackgroundFormatting(result));", code);
+        Assert.Contains("SetStatus(UserFacingText.ForBackgroundFormatting(result, rawPasted));", code);
         Assert.Contains("UserFacingText.ForStage(stage, _controller.ActiveMode, message)", code);
         Assert.Equal("整形候補を採用済み", UserFacingText.StatusCandidateAdopted);
         Assert.Equal("再整形中…（高品質）", UserFacingText.ForReformatStarted(FeatherScribe.Core.FormattingMode.PlainQuality));

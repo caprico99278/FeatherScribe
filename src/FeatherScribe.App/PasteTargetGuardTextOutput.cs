@@ -40,6 +40,6 @@ internal sealed class PasteTargetGuardTextOutput : ITextOutput
 
         // No external target: keep the text on the clipboard, but never paste into our own window.
         await _inner.OutputAsync(text, OutputMode.ClipboardOnly, cancellationToken).ConfigureAwait(false);
-        throw new InvalidOperationException("paste target unavailable");
+        throw new PasteTargetUnavailableException();
     }
 }

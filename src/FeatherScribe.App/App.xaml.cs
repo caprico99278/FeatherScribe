@@ -222,9 +222,10 @@ public partial class App : Application
         });
 
         // バックグラウンド整形の完了通知 (ワーカースレッドから来るためDispatcherへ)
-        controller.BackgroundFormattingCompleted += result => Dispatcher.Invoke(() =>
+        // rawPasted: the raw text of this operation is known to be pasted (never claimed otherwise).
+        controller.BackgroundFormattingCompleted += (result, rawPasted) => Dispatcher.Invoke(() =>
         {
-            _mainWindow!.UpdateBackgroundFormatting(result);
+            _mainWindow!.UpdateBackgroundFormatting(result, rawPasted);
             _overlay!.ShowPresentation(OverlayPresentationMapper.FromBackgroundFormattingResult(result));
 
             if (result.FormattedText is not null)
@@ -238,13 +239,13 @@ public partial class App : Application
             {
                 _trayIconService!.Notify(
                     UserFacingText.NotifyBackgroundRejectedTitle,
-                    UserFacingText.NotifyBackgroundRejectedBody(result));
+                    UserFacingText.NotifyBackgroundRejectedBody(result, rawPasted));
             }
             else
             {
                 _trayIconService!.Notify(
                     UserFacingText.NotifyBackgroundFailedTitle,
-                    UserFacingText.NotifyBackgroundFailedBody);
+                    UserFacingText.NotifyBackgroundFailedBodyFor(rawPasted));
             }
         });
     }

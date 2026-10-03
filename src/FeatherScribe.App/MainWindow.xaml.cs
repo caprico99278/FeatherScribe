@@ -81,7 +81,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>バックグラウンド整形の完了 (成功時は直近の結果を整形結果へ更新)。</summary>
-    public void UpdateBackgroundFormatting(BackgroundFormattingResult result)
+    /// <param name="rawPasted">The raw text of this operation is known to be pasted (see DictationController).</param>
+    public void UpdateBackgroundFormatting(BackgroundFormattingResult result, bool rawPasted)
     {
         if (result.FormattedText is { } formatted)
         {
@@ -98,7 +99,7 @@ public partial class MainWindow : Window
             RejectedResultText.Text = "";
         }
 
-        SetStatus(UserFacingText.ForBackgroundFormatting(result));
+        SetStatus(UserFacingText.ForBackgroundFormatting(result, rawPasted));
         RefreshActionAvailability();
     }
 
