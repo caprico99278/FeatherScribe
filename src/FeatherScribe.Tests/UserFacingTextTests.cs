@@ -92,17 +92,84 @@ public sealed class UserFacingTextTests
     }
 
     [Fact]
+    public void ForResult_PasteTargetUnavailable_SaysTextIsOnClipboard()
+    {
+        // The paste guard copied the text to the clipboard before failing (ClipboardOnly).
+        Assert.Equal(
+            "貼り付け先が見つからないため、クリップボードにコピーしました",
+            UserFacingText.ForResult(PasteTargetUnavailable(backgroundStarted: false)));
+        Assert.Equal(
+            "貼り付け先が見つからないため、クリップボードにコピーしました",
+            UserFacingText.ForResult(PasteTargetUnavailable(backgroundStarted: true)));
+    }
+
+    [Fact]
+    public void ForResult_OtherOutputFailure_KeepsGenericTextWithoutClipboardClaim()
+    {
+        // e.g. a failed Ctrl+V with restoreClipboard=true: the user's clipboard was restored.
+        var result = new PipelineResult(
+            true, "text", false, false, OutputSucceeded: false, "SendInput failed", OutputErrorMessage: "SendInput failed");
+
+        Assert.Equal("貼り付けできませんでした・結果は画面に保持しています", UserFacingText.ForResult(result));
+        Assert.Equal(
+            new TrayNotice("貼り付けできませんでした", "結果は画面に保持しています。画面からクリップボードにコピーできます。"),
+            UserFacingText.CompletionNotice(result));
+    }
+
+    [Fact]
+    public void PasteTargetUnavailable_OnlyMatchesFailedOutputWithGuardError()
+    {
+        Assert.True(PasteTargetUnavailableException.IsCauseOf(PasteTargetUnavailable(backgroundStarted: false)));
+        // ErrorMessage alone is not trusted (it can carry other notes); OutputErrorMessage decides.
+        Assert.False(PasteTargetUnavailableException.IsCauseOf(
+            new PipelineResult(true, "text", false, false, false, "paste target unavailable")));
+        Assert.False(PasteTargetUnavailableException.IsCauseOf(
+            new PipelineResult(true, "text", false, false, true, null, OutputErrorMessage: "paste target unavailable")));
+        Assert.Equal("paste target unavailable", new PasteTargetUnavailableException().Message);
+        Assert.IsAssignableFrom<InvalidOperationException>(new PasteTargetUnavailableException());
+    }
+
+    [Fact]
     public void ForBackgroundFormatting_MapsEveryCase()
     {
         Assert.Equal(
             "整形完了・コピーまたは貼り付けできます",
-            UserFacingText.ForBackgroundFormatting(Background("formatted", null)));
+            UserFacingText.ForBackgroundFormatting(Background("formatted", null), rawPasted: true));
         Assert.Equal(
             "整形候補があります（文末表現が変化）・確認して採用できます",
-            UserFacingText.ForBackgroundFormatting(Background(null, "整形結果を破棄しました: request_phrase_removed", "candidate")));
+            UserFacingText.ForBackgroundFormatting(Background(null, "整形結果を破棄しました: request_phrase_removed", "candidate"), rawPasted: true));
         Assert.Equal(
             "整形できませんでした・未整形の文章は貼り付け済みです",
-            UserFacingText.ForBackgroundFormatting(Background(null, "timeout")));
+            UserFacingText.ForBackgroundFormatting(Background(null, "timeout"), rawPasted: true));
+    }
+
+    [Fact]
+    public void ForBackgroundFormatting_RawNotPasted_NeverClaimsPaste()
+    {
+        Assert.Equal(
+            "整形完了・コピーまたは貼り付けできます",
+            UserFacingText.ForBackgroundFormatting(Background("formatted", null), rawPasted: false));
+        Assert.Equal(
+            "整形候補があります（文末表現が変化）・確認して採用できます",
+            UserFacingText.ForBackgroundFormatting(Background(null, "整形結果を破棄しました: request_phrase_removed", "candidate"), rawPasted: false));
+        Assert.Equal(
+            "整形できませんでした・未整形の文章は画面に保持しています",
+            UserFacingText.ForBackgroundFormatting(Background(null, "LLM へ接続できません"), rawPasted: false));
+    }
+
+    [Fact]
+    public void BackgroundTrayBodies_DependOnRawPasted()
+    {
+        var rejected = Background(null, "整形結果を破棄しました: heading_or_label", "candidate");
+
+        Assert.Equal(
+            "理由: 見出し・ラベルが混入\n未整形の文章は貼り付け済みです。整形候補は画面で確認して採用できます。",
+            UserFacingText.NotifyBackgroundRejectedBody(rejected, rawPasted: true));
+        Assert.Equal(
+            "理由: 見出し・ラベルが混入\n未整形の文章は画面に保持しています。整形候補は画面で確認して採用できます。",
+            UserFacingText.NotifyBackgroundRejectedBody(rejected, rawPasted: false));
+        Assert.Equal("未整形の文章は貼り付け済みです。", UserFacingText.NotifyBackgroundFailedBodyFor(rawPasted: true));
+        Assert.Equal("未整形の文章は画面に保持しています。", UserFacingText.NotifyBackgroundFailedBodyFor(rawPasted: false));
     }
 
     [Fact]
@@ -180,9 +247,11 @@ public sealed class UserFacingTextTests
         Assert.Equal("整形候補があります", UserFacingText.NotifyBackgroundRejectedTitle);
         Assert.Equal(
             "理由: 見出し・ラベルが混入\n未整形の文章は貼り付け済みです。整形候補は画面で確認して採用できます。",
-            UserFacingText.NotifyBackgroundRejectedBody(Background(null, "整形結果を破棄しました: heading_or_label", "candidate")));
+            UserFacingText.NotifyBackgroundRejectedBody(Background(null, "整形結果を破棄しました: heading_or_label", "candidate"), rawPasted: true));
         Assert.Equal("整形できませんでした", UserFacingText.NotifyBackgroundFailedTitle);
         Assert.Equal("未整形の文章は貼り付け済みです。", UserFacingText.NotifyBackgroundFailedBody);
+        Assert.Equal("未整形の文章は画面に保持しています。", UserFacingText.NotifyBackgroundFailedBodyRawNotPasted);
+        Assert.Equal("貼り付け先が見つからないため、クリップボードにコピーしました。", UserFacingText.NotifyPasteTargetUnavailableBody);
     }
 
     [Theory]
@@ -225,6 +294,9 @@ public sealed class UserFacingTextTests
             new TrayNotice("貼り付けできませんでした", "結果は画面に保持しています。画面からクリップボードにコピーできます。"),
             UserFacingText.CompletionNotice(new PipelineResult(true, "text", false, true, false, "timeout")));
         Assert.Equal(
+            new TrayNotice("貼り付けできませんでした", "貼り付け先が見つからないため、クリップボードにコピーしました。"),
+            UserFacingText.CompletionNotice(PasteTargetUnavailable(backgroundStarted: true)));
+        Assert.Equal(
             new TrayNotice("整形できませんでした", "未整形の文章を貼り付けました。"),
             UserFacingText.CompletionNotice(new PipelineResult(true, "text", false, true, true, "timeout")));
     }
@@ -241,7 +313,7 @@ public sealed class UserFacingTextTests
     [Fact]
     public void OperationGuide_IsCompactAndHasNoConfigKeys()
     {
-        var guide = UserFacingText.OperationGuide(new HotkeySettings(), llmEnabled: true, FormattingMode.Polite);
+        var guide = UserFacingText.OperationGuide(new HotkeySettings(), llmEnabled: true, FormattingMode.Polite, "gemma4:e2b");
 
         Assert.Equal(
             "キーを押して録音、もう一度押して停止します。\n" +
@@ -253,17 +325,29 @@ public sealed class UserFacingTextTests
             "Ctrl+Alt+Shift+M　メモ\n" +
             "Ctrl+Alt+Shift+D　開発指示\n" +
             "Ctrl+Shift+F7　選択テキストを編集（丁寧文）\n" +
-            "LLM整形: オン",
+            "LLM整形: オン（gemma4:e2b）",
             guide);
         Assert.DoesNotContain("llm.enabled", guide);
         Assert.DoesNotContain("\t", guide);
+    }
+
+    [Theory]
+    [InlineData(true, "gemma4:e2b", "LLM整形: オン（gemma4:e2b）")]
+    [InlineData(true, "hf.co/org/model-1.5B-GGUF:Q5_K_M", "LLM整形: オン（hf.co/org/model-1.5B-GGUF:Q5_K_M）")]
+    [InlineData(true, null, "LLM整形: オン")]
+    [InlineData(true, " ", "LLM整形: オン")]
+    [InlineData(false, "gemma4:e2b", "LLM整形: オフ（どのキーでも未整形で入力します）")]
+    [InlineData(false, null, "LLM整形: オフ（どのキーでも未整形で入力します）")]
+    public void GuideLlmLine_ShowsModelOnlyWhenOn(bool llmEnabled, string? model, string expected)
+    {
+        Assert.Equal(expected, UserFacingText.GuideLlmLine(llmEnabled, model));
     }
 
     [Fact]
     public void OperationGuide_UsesConfiguredHotkeysAndLlmOff()
     {
         var hotkeys = new HotkeySettings { NoFormat = "Ctrl+Alt+1", Memo = "Ctrl+Alt+9", EditSelection = "Ctrl+Alt+E" };
-        var lines = UserFacingText.OperationGuide(hotkeys, llmEnabled: false, FormattingMode.Bullet).Split('\n');
+        var lines = UserFacingText.OperationGuide(hotkeys, llmEnabled: false, FormattingMode.Bullet, "gemma4:e2b").Split('\n');
 
         Assert.Equal(10, lines.Length);
         Assert.Equal("Ctrl+Alt+1　未整形", lines[1]);
@@ -283,4 +367,14 @@ public sealed class UserFacingTextTests
 
     private static BackgroundFormattingResult Background(string? formatted, string? error, string? rejected = null)
         => new(Guid.NewGuid(), FormattingMode.PlainFast, formatted, error, rejected);
+
+    private static PipelineResult PasteTargetUnavailable(bool backgroundStarted)
+        => new(
+            true,
+            "raw",
+            backgroundStarted,
+            false,
+            OutputSucceeded: false,
+            "paste target unavailable",
+            OutputErrorMessage: "paste target unavailable");
 }

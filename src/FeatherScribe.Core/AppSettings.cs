@@ -23,6 +23,13 @@ public sealed class AsrSettings
 
 public sealed class LlmSettings
 {
+    /// <summary>
+    /// keep_alive used when the launcher (FeatherScribe.cmd) enables LLM formatting and llm.keepAlive is not
+    /// configured: Ollama's default of 5 minutes would unload the model between dictations and the next
+    /// format would cold-load past the timeout. Shared by the launcher preload and the app.
+    /// </summary>
+    public const string LauncherDefaultKeepAlive = "60m";
+
     /// <summary>LLM整形の有効/無効。既定OFF (初期UXを最速のraw貼り付けに保つ)。</summary>
     public bool Enabled { get; init; } = false;
 

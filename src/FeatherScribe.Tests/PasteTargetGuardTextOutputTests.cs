@@ -48,7 +48,7 @@ public sealed class PasteTargetGuardTextOutputTests
         var inner = new RecordingOutput();
         var guard = new PasteTargetGuardTextOutput(inner, () => true, () => false);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+        var exception = await Assert.ThrowsAsync<PasteTargetUnavailableException>(
             () => guard.OutputAsync("text", OutputMode.ClipboardAndPaste, CancellationToken.None));
 
         Assert.Equal("paste target unavailable", exception.Message);
@@ -96,6 +96,103 @@ public sealed class PasteTargetGuardTextOutputTests
         Assert.Equal("hello", result.Text);
         Assert.False(result.OutputSucceeded);
         Assert.Equal([("hello", OutputMode.ClipboardOnly)], inner.Calls);
+    }
+
+    [Theory]
+    // mode, llm enabled (raw-first): every output path carries the paste guard error separately.
+    [InlineData(FormattingMode.NoFormat, false)]
+    [InlineData(FormattingMode.PlainFast, false)]
+    [InlineData(FormattingMode.PlainFast, true)]
+    public async Task PasteTargetUnavailable_UsesClipboardWordingAndKeepsEventLogErrorType(
+        FormattingMode mode,
+        bool llmEnabled)
+    {
+        var settings = new AppSettings { Llm = new LlmSettings { Enabled = llmEnabled, RawFirstPaste = true } };
+        var eventLog = new CapturingEventLog();
+        using var pipeline = new DictationPipeline(
+            new FakeRecorder(),
+            new FixedSpeechToText("hello"),
+            new FailingFormatter(),
+            new DictionaryCorrector([]),
+            new PasteTargetGuardTextOutput(new RecordingOutput(), () => true, () => false),
+            new EmptyDictionaryProvider(),
+            eventLog,
+            settings);
+
+        var result = await pipeline.RunAsync(mode, CancellationToken.None, CancellationToken.None);
+
+        Assert.False(result.OutputSucceeded);
+        Assert.Equal("paste target unavailable", result.OutputErrorMessage);
+        var output = Assert.Single(eventLog.Events, entry => entry.Stage == "output");
+        Assert.False(output.Success);
+        Assert.Equal("paste target unavailable", output.ErrorType);
+        Assert.Equal("貼り付け先が見つからないため、クリップボードにコピーしました", UserFacingText.ForResult(result));
+        Assert.Equal(
+            new TrayNotice("貼り付けできませんでした", "貼り付け先が見つからないため、クリップボードにコピーしました。"),
+            UserFacingText.CompletionNotice(result));
+    }
+
+    [Fact]
+    public async Task OtherOutputFailure_KeepsGenericWordingAndEventLogErrorType()
+    {
+        var settings = new AppSettings();
+        var eventLog = new CapturingEventLog();
+        using var pipeline = new DictationPipeline(
+            new FakeRecorder(),
+            new FixedSpeechToText("hello"),
+            new FailingFormatter(),
+            new DictionaryCorrector([]),
+            new ThrowingOutput(),
+            new EmptyDictionaryProvider(),
+            eventLog,
+            settings);
+
+        var result = await pipeline.RunAsync(FormattingMode.NoFormat, CancellationToken.None, CancellationToken.None);
+
+        Assert.False(result.OutputSucceeded);
+        Assert.Equal("SendInput failed", result.OutputErrorMessage);
+        Assert.Equal("SendInput failed", Assert.Single(eventLog.Events, entry => entry.Stage == "output").ErrorType);
+        Assert.Equal("貼り付けできませんでした・結果は画面に保持しています", UserFacingText.ForResult(result));
+        Assert.Equal(
+            new TrayNotice("貼り付けできませんでした", "結果は画面に保持しています。画面からクリップボードにコピーできます。"),
+            UserFacingText.CompletionNotice(result));
+    }
+
+    private sealed class FailingFormatter : ITextFormatter
+    {
+        public Task<FormatResult> FormatAsync(FormatRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(new FormatResult(request.RawText, true, "LLM へ接続できません"));
+    }
+
+    private sealed class ThrowingOutput : ITextOutput
+    {
+        public Task OutputAsync(string text, OutputMode mode, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("SendInput failed");
+    }
+
+    private sealed class CapturingEventLog : IEventLog
+    {
+        private readonly object _gate = new();
+        private readonly List<PipelineEvent> _events = [];
+
+        public IReadOnlyList<PipelineEvent> Events
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return [.. _events];
+                }
+            }
+        }
+
+        public void Write(PipelineEvent entry)
+        {
+            lock (_gate)
+            {
+                _events.Add(entry);
+            }
+        }
     }
 
     private sealed class FakeRecorder : IAudioRecorder

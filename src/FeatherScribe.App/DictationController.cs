@@ -25,10 +25,25 @@ public sealed class DictationController
     private FormattingMode? _lastFormattingMode;
     private bool _lastBackgroundFormattingRejected;
 
+    // Whether the output of LastRawResult was pasted, and the operation (dictation, or a reformat of
+    // the same raw text) that state applies to. Any other operation id means "unknown".
+    private bool _lastRawPasted;
+    private Guid _rawPastedOperationId;
+
     public event Action<PipelineResult>? Completed;
 
-    /// <summary>バックグラウンド整形の完了通知 (成功/失敗)。</summary>
-    public event Action<BackgroundFormattingResult>? BackgroundFormattingCompleted;
+    /// <summary>
+    /// バックグラウンド整形の完了通知 (成功/失敗)。第2引数は、その操作の未整形文章が貼り付け済みと
+    /// 確認できているか (貼り付け失敗・不明時は false。UI は貼り付け済みと表示してはならない)。
+    /// </summary>
+    public event Action<BackgroundFormattingResult, bool>? BackgroundFormattingCompleted;
+
+    /// <summary>
+    /// The recording limit stopped the latest dictation's recording (raised once, when processing starts).
+    /// The controller has moved from Recording to Processing (as after a user stop), so hotkey presses during
+    /// processing are ignored and the next press after completion starts a new recording. Raised from a worker thread.
+    /// </summary>
+    public event Action<RecordingLimitNotice>? RecordingLimitReached;
 
     /// <summary>直近結果 (コピー/貼り付け用)。バックグラウンド整形成功時は整形結果で更新される。</summary>
     public string? LastResult { get; private set; }
@@ -49,13 +64,38 @@ public sealed class DictationController
         _pipeline = pipeline;
         _settings = settings;
         _pipeline.BackgroundFormattingCompleted += OnBackgroundFormattingCompleted;
+        _pipeline.RecordingLimitReached += OnRecordingLimitReached;
+    }
+
+    private void OnRecordingLimitReached(RecordingLimitNotice notice)
+    {
+        lock (_gate)
+        {
+            if (notice.OperationId != _latestOperationId)
+            {
+                return;
+            }
+
+            // The recorder stopped by itself: the dictation is processing now, the same state as after a
+            // user stop. Otherwise the user's next hotkey press would be consumed as "stop" and lost.
+            // Nothing is cancelled; _stopRecordingCts is disposed when the run completes, as usual.
+            if (_state == State.Recording)
+            {
+                _state = State.Processing;
+            }
+        }
+
+        RecordingLimitReached?.Invoke(notice);
     }
 
     private void OnBackgroundFormattingCompleted(BackgroundFormattingResult result)
     {
         var shouldPublish = true;
+        bool rawPasted;
         lock (_gate)
         {
+            // Unknown (e.g. the background result arrived before the dictation result) → not pasted.
+            rawPasted = _rawPastedOperationId == result.OperationId && _lastRawPasted;
             if (result.OperationId != _latestOperationId)
             {
                 shouldPublish = false;
@@ -76,7 +116,7 @@ public sealed class DictationController
 
         if (shouldPublish)
         {
-            BackgroundFormattingCompleted?.Invoke(result);
+            BackgroundFormattingCompleted?.Invoke(result, rawPasted);
         }
     }
 
@@ -142,6 +182,8 @@ public sealed class DictationController
                 {
                     LastResult = result.Text;
                     LastRawResult = result.Text;
+                    _lastRawPasted = result.OutputSucceeded;
+                    _rawPastedOperationId = operationId;
                     _lastFormattingMode = mode;
                 }
             }
@@ -229,6 +271,9 @@ public sealed class DictationController
                 : mode;
 
             _latestOperationId = Guid.NewGuid();
+            // A reformat uses the same raw text, so its paste state carries over (always recorded
+            // together with LastRawResult).
+            _rawPastedOperationId = _latestOperationId;
             _lastFormattingMode = retryMode;
             _lastBackgroundFormattingRejected = false;
             LastFormattedResult = null;

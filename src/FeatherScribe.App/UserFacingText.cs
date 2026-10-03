@@ -24,8 +24,10 @@ internal static class UserFacingText
     public const string StatusRawPastedFormatting = "未整形の文章を貼り付けました・整形中…";
     public const string StatusFallback = "整形できなかったため、未整形の文章を貼り付けました";
     public const string StatusOutputFailed = "貼り付けできませんでした・結果は画面に保持しています";
+    public const string StatusPasteTargetUnavailable = "貼り付け先が見つからないため、クリップボードにコピーしました";
     public const string StatusBackgroundFormatted = "整形完了・コピーまたは貼り付けできます";
     public const string StatusBackgroundFailed = "整形できませんでした・未整形の文章は貼り付け済みです";
+    public const string StatusBackgroundFailedRawNotPasted = "整形できませんでした・未整形の文章は画面に保持しています";
     public const string StatusReformatting = "再整形中…";
     public const string StatusReformattingQuality = "再整形中…（高品質）";
     public const string StatusCandidateAdopted = "整形候補を採用済み";
@@ -45,12 +47,15 @@ internal static class UserFacingText
     public const string NotifyFallbackBody = "未整形の文章を貼り付けました。";
     public const string NotifyOutputFailedTitle = "貼り付けできませんでした";
     public const string NotifyOutputFailedBody = "結果は画面に保持しています。画面からクリップボードにコピーできます。";
+    public const string NotifyPasteTargetUnavailableBody = "貼り付け先が見つからないため、クリップボードにコピーしました。";
     public const string NotifyBackgroundFormattedTitle = "整形完了";
     public const string NotifyBackgroundFormattedBody =
         "整形結果は「クリップボードにコピー」または「直前の入力先へ貼り付け」で使えます（自動では置き換えません）。";
     public const string NotifyBackgroundRejectedTitle = "整形候補があります";
     public const string NotifyBackgroundFailedTitle = "整形できませんでした";
     public const string NotifyBackgroundFailedBody = "未整形の文章は貼り付け済みです。";
+    public const string NotifyBackgroundFailedBodyRawNotPasted = "未整形の文章は画面に保持しています。";
+    public const string NotifyRecordingLimitTitle = "録音上限に達しました";
 
     // --- Operation guide ---
     public const string GuideIntro = "キーを押して録音、もう一度押して停止します。";
@@ -146,9 +151,13 @@ internal static class UserFacingText
         }
 
         // A failed paste is reported first so the status never claims the text was pasted.
+        // Only the paste guard case says the clipboard holds the result: after any other output
+        // failure the clipboard may have been restored to the user's previous content.
         if (!result.OutputSucceeded)
         {
-            return StatusOutputFailed;
+            return PasteTargetUnavailableException.IsCauseOf(result)
+                ? StatusPasteTargetUnavailable
+                : StatusOutputFailed;
         }
 
         if (result.BackgroundFormattingStarted)
@@ -159,16 +168,21 @@ internal static class UserFacingText
         return result.UsedFallback ? StatusFallback : StatusCompleted;
     }
 
-    public static string ForBackgroundFormatting(BackgroundFormattingResult result)
+    /// <param name="rawPasted">True only when the raw output of the dictation this result belongs to is
+    /// known to have been pasted; false (also when unknown) never claims a paste.</param>
+    public static string ForBackgroundFormatting(BackgroundFormattingResult result, bool rawPasted)
     {
         if (result.FormattedText is not null)
         {
             return StatusBackgroundFormatted;
         }
 
-        return IsRejectedCandidate(result)
-            ? $"整形候補があります（{BackgroundDisplayReason(result)}）・確認して採用できます"
-            : StatusBackgroundFailed;
+        if (IsRejectedCandidate(result))
+        {
+            return $"整形候補があります（{BackgroundDisplayReason(result)}）・確認して採用できます";
+        }
+
+        return rawPasted ? StatusBackgroundFailed : StatusBackgroundFailedRawNotPasted;
     }
 
     public static string ForReformatStarted(FormattingMode mode)
@@ -200,7 +214,9 @@ internal static class UserFacingText
 
         if (!result.OutputSucceeded)
         {
-            return new TrayNotice(NotifyOutputFailedTitle, NotifyOutputFailedBody);
+            return new TrayNotice(
+                NotifyOutputFailedTitle,
+                PasteTargetUnavailableException.IsCauseOf(result) ? NotifyPasteTargetUnavailableBody : NotifyOutputFailedBody);
         }
 
         return result.UsedFallback
@@ -208,14 +224,54 @@ internal static class UserFacingText
             : null;
     }
 
-    public static string NotifyBackgroundRejectedBody(BackgroundFormattingResult result)
-        => $"理由: {BackgroundDisplayReason(result)}\n未整形の文章は貼り付け済みです。整形候補は画面で確認して採用できます。";
+    /// <summary>
+    /// The recording limit as the user reads it: whole minutes 「5分」, under two minutes in seconds 「90秒」,
+    /// otherwise minutes and seconds 「2分30秒」. Values below 1 are shown as 1 second (the recorder minimum).
+    /// </summary>
+    public static string RecordingLimitLabel(int seconds)
+    {
+        var value = Math.Max(1, seconds);
+        if (value % 60 == 0)
+        {
+            return $"{value / 60}分";
+        }
+
+        return value < 120 ? $"{value}秒" : $"{value / 60}分{value % 60}秒";
+    }
+
+    /// <summary>Overlay text while transcribing a recording the limit stopped.</summary>
+    public static string RecordingLimitTranscribing(int limitSeconds)
+        => $"録音上限（{RecordingLimitLabel(limitSeconds)}）で停止・文字起こし中";
+
+    /// <summary>Tray notice shown once when the recording limit stopped the recording.</summary>
+    public static TrayNotice RecordingLimitTrayNotice(int limitSeconds)
+        => new(
+            NotifyRecordingLimitTitle,
+            $"{RecordingLimitLabel(limitSeconds)}で録音を自動停止しました。続きは、文字起こしが終わってからもう一度ホットキーを押して録音してください。");
+
+    /// <param name="rawPasted">Same meaning as in <see cref="ForBackgroundFormatting"/>.</param>
+    public static string NotifyBackgroundRejectedBody(BackgroundFormattingResult result, bool rawPasted)
+    {
+        var state = rawPasted ? "貼り付け済みです" : "画面に保持しています";
+        return $"理由: {BackgroundDisplayReason(result)}\n未整形の文章は{state}。整形候補は画面で確認して採用できます。";
+    }
+
+    /// <param name="rawPasted">Same meaning as in <see cref="ForBackgroundFormatting"/>.</param>
+    public static string NotifyBackgroundFailedBodyFor(bool rawPasted)
+        => rawPasted ? NotifyBackgroundFailedBody : NotifyBackgroundFailedBodyRawNotPasted;
+
+    /// <summary>The LLM formatting state line: 「LLM整形: オン（{model}）」 when on (model omitted when unknown), otherwise the off text.</summary>
+    public static string GuideLlmLine(bool llmEnabled, string? llmModel)
+        => !llmEnabled ? GuideLlmOff
+            : string.IsNullOrWhiteSpace(llmModel) ? GuideLlmOn
+            : $"{GuideLlmOn}（{llmModel.Trim()}）";
 
     /// <summary>
     /// Compact operation guide: one hotkey per line, the selected-text editing hotkey (omitted when it is
-    /// disabled), then the LLM formatting state.
+    /// disabled), then the LLM formatting state with the model when on.
     /// </summary>
-    public static string OperationGuide(HotkeySettings hotkeys, bool llmEnabled, FormattingMode selectionEditMode)
+    public static string OperationGuide(
+        HotkeySettings hotkeys, bool llmEnabled, FormattingMode selectionEditMode, string? llmModel = null)
     {
         var builder = new StringBuilder(GuideIntro);
         foreach (var (mode, hotkey) in GuideHotkeys(hotkeys))
@@ -228,7 +284,7 @@ internal static class UserFacingText
             builder.Append('\n').Append(SelectionEditGuideLine(hotkeys.EditSelection, selectionEditMode));
         }
 
-        builder.Append('\n').Append(llmEnabled ? GuideLlmOn : GuideLlmOff);
+        builder.Append('\n').Append(GuideLlmLine(llmEnabled, llmModel));
         return builder.ToString();
     }
 

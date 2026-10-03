@@ -26,6 +26,10 @@ public partial class App : Application
     private NAudioRecorder? _recorder;
     private SelectionEditService? _selectionEditService;
 
+    // Ollama server started by the launcher (--owned-ollama-pid): stopped when FeatherScribe exits.
+    private int? _ownedOllamaPid;
+    private string? _rootPath;
+
     // Recording meter coalescing: the audio thread stores only the latest level and posts
     // at most one pending UI update at a time (visual_direction.md §24).
     private float _latestAudioLevel;
@@ -37,7 +41,12 @@ public partial class App : Application
 
         var rootPath = AppRoot.Locate();
         var settingsProvider = new JsonAppSettingsProvider(rootPath);
-        var settings = settingsProvider.Load();
+
+        // Launcher overrides (FeatherScribe.cmd): in memory only, config files are not written.
+        var overrides = LaunchOverrides.Parse(e.Args);
+        var settings = overrides.Apply(settingsProvider.Load());
+        _rootPath = rootPath;
+        _ownedOllamaPid = overrides.OwnedOllamaPid;
 
         var dictionaryProvider = new JsonDictionaryProvider(rootPath);
         _httpClient = new HttpClient();
@@ -221,10 +230,20 @@ public partial class App : Application
             }
         });
 
-        // バックグラウンド整形の完了通知 (ワーカースレッドから来るためDispatcherへ)
-        controller.BackgroundFormattingCompleted += result => Dispatcher.Invoke(() =>
+        // 録音上限による自動停止: 文字起こし開始時に一度だけ知らせる (以後は通常の完了表示)。
+        // Raised right after the Transcribing stage, so this text replaces 「文字起こし中」.
+        controller.RecordingLimitReached += notice => Dispatcher.Invoke(() =>
         {
-            _mainWindow!.UpdateBackgroundFormatting(result);
+            _overlay!.ShowPresentation(OverlayPresentationMapper.FromRecordingLimitReached(notice));
+            var trayNotice = UserFacingText.RecordingLimitTrayNotice(notice.LimitSeconds);
+            _trayIconService!.Notify(trayNotice.Title, trayNotice.Body);
+        });
+
+        // バックグラウンド整形の完了通知 (ワーカースレッドから来るためDispatcherへ)
+        // rawPasted: the raw text of this operation is known to be pasted (never claimed otherwise).
+        controller.BackgroundFormattingCompleted += (result, rawPasted) => Dispatcher.Invoke(() =>
+        {
+            _mainWindow!.UpdateBackgroundFormatting(result, rawPasted);
             _overlay!.ShowPresentation(OverlayPresentationMapper.FromBackgroundFormattingResult(result));
 
             if (result.FormattedText is not null)
@@ -238,13 +257,13 @@ public partial class App : Application
             {
                 _trayIconService!.Notify(
                     UserFacingText.NotifyBackgroundRejectedTitle,
-                    UserFacingText.NotifyBackgroundRejectedBody(result));
+                    UserFacingText.NotifyBackgroundRejectedBody(result, rawPasted));
             }
             else
             {
                 _trayIconService!.Notify(
                     UserFacingText.NotifyBackgroundFailedTitle,
-                    UserFacingText.NotifyBackgroundFailedBody);
+                    UserFacingText.NotifyBackgroundFailedBodyFor(rawPasted));
             }
         });
     }
@@ -289,6 +308,25 @@ public partial class App : Application
         _pipeline?.Dispose(); // 実行中のバックグラウンド整形を安全にキャンセル
         _foregroundWindowTracker?.Dispose();
         _httpClient?.Dispose();
+        StopOwnedOllama();
         base.OnExit(e);
+    }
+
+    /// <summary>
+    /// Stops the Ollama server the launcher started for this session (tray 終了 and window close both end
+    /// here). A server that was already running is never passed to the app, so it is never stopped.
+    /// </summary>
+    private void StopOwnedOllama()
+    {
+        if (_ownedOllamaPid is not { } pid || _rootPath is null)
+        {
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var errorType = OwnedOllamaProcess.TryStop(pid, OwnedOllamaProcess.ExpectedExecutablePath(_rootPath));
+        _eventLog?.Write(new PipelineEvent(
+            DateTimeOffset.Now, "ollama_stop", errorType is null,
+            errorType, stopwatch.ElapsedMilliseconds, "Shutdown", null, 0));
     }
 }

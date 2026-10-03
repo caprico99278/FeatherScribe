@@ -76,6 +76,12 @@ public class DictationControllerTests
             => Task.CompletedTask;
     }
 
+    private sealed class FailingOutput : ITextOutput
+    {
+        public Task OutputAsync(string text, OutputMode mode, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("paste target unavailable");
+    }
+
     private sealed class EmptyDictionaryProvider : IDictionaryProvider
     {
         public IReadOnlyList<DictionaryEntry> Load() => [];
@@ -395,8 +401,129 @@ public class DictationControllerTests
         AssertReformatLastMatchesCanReformat(controller, expected);
     }
 
+    [Theory]
+    // outputSucceeds, rejected candidate, expected status, expected tray body
+    [InlineData(false, false, "整形できませんでした・未整形の文章は画面に保持しています", "未整形の文章は画面に保持しています。")]
+    [InlineData(true, false, "整形できませんでした・未整形の文章は貼り付け済みです", "未整形の文章は貼り付け済みです。")]
+    [InlineData(false, true, "整形候補があります（文末表現が変化）・確認して採用できます",
+        "理由: 文末表現が変化\n未整形の文章は画面に保持しています。整形候補は画面で確認して採用できます。")]
+    [InlineData(true, true, "整形候補があります（文末表現が変化）・確認して採用できます",
+        "理由: 文末表現が変化\n未整形の文章は貼り付け済みです。整形候補は画面で確認して採用できます。")]
+    public async Task BackgroundFailure_ReportsWhetherRawWasPasted(
+        bool outputSucceeds,
+        bool rejected,
+        string expectedStatus,
+        string expectedTrayBody)
+    {
+        var settings = LlmEnabled();
+        var backgroundFormatResult = new TaskCompletionSource<FormatResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var controller = CreateController(
+            settings,
+            new QueueSpeechToText("raw text"),
+            backgroundFormatResult.Task,
+            outputSucceeds ? new CapturingOutput() : new FailingOutput());
+
+        var completed = ListenCompleted(controller);
+        var background = ListenControllerBackgroundWithPasteState(controller);
+        controller.Toggle(FormattingMode.PlainFast);
+        var dictation = await completed.WaitAsync(EventTimeout);
+
+        Assert.True(dictation.BackgroundFormattingStarted);
+        Assert.Equal(outputSucceeds, dictation.OutputSucceeded);
+
+        // The background result arrives after the dictation result was recorded.
+        backgroundFormatResult.SetResult(rejected
+            ? new FormatResult("raw text", true, "整形結果を破棄しました: request_phrase_removed", "candidate")
+            : new FormatResult("raw text", true, "LLM へ接続できません"));
+        var (result, rawPasted) = await background.WaitAsync(EventTimeout);
+
+        Assert.Equal(outputSucceeds, rawPasted);
+        Assert.Equal(expectedStatus, UserFacingText.ForBackgroundFormatting(result, rawPasted));
+        Assert.Equal(
+            expectedTrayBody,
+            rejected
+                ? UserFacingText.NotifyBackgroundRejectedBody(result, rawPasted)
+                : UserFacingText.NotifyBackgroundFailedBodyFor(rawPasted));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReformatLast_UsesRawPasteStateOfOriginalDictation(bool outputSucceeds)
+    {
+        var settings = LlmEnabled();
+        var firstFormatResult = new TaskCompletionSource<FormatResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var controller = CreateController(
+            settings,
+            new QueueSpeechToText("raw text"),
+            firstFormatResult.Task,
+            outputSucceeds ? new CapturingOutput() : new FailingOutput());
+
+        var completed = ListenCompleted(controller);
+        var firstBackground = ListenControllerBackground(controller);
+        controller.Toggle(FormattingMode.PlainFast);
+        await completed.WaitAsync(EventTimeout);
+        firstFormatResult.SetResult(new FormatResult("raw text", true, "timeout"));
+        await firstBackground.WaitAsync(EventTimeout);
+
+        var reformat = ListenControllerBackgroundWithPasteState(controller);
+        Assert.NotNull(controller.ReformatLast());
+        var (result, rawPasted) = await reformat.WaitAsync(EventTimeout);
+
+        Assert.Equal("formatted: raw text", result.FormattedText);
+        Assert.Equal(outputSucceeds, rawPasted);
+    }
+
+    [Fact]
+    public async Task BackgroundResultBeforeDictationResult_IsNotReportedAsPasted()
+    {
+        var settings = LlmEnabled();
+        var speechToText = new GatedSpeechToText("raw text");
+        var controller = CreateController(settings, speechToText);
+
+        var completed = ListenCompleted(controller);
+        controller.Toggle(FormattingMode.PlainFast);
+        await speechToText.Started.WaitAsync(EventTimeout);
+
+        // Raw paste state of this operation is still unknown: never claim a paste.
+        var background = ListenControllerBackgroundWithPasteState(controller);
+        PublishBackgroundCompletion(controller, new BackgroundFormattingResult(
+            GetLatestOperationId(controller), FormattingMode.PlainFast, null, "timeout"));
+        var (result, rawPasted) = await background.WaitAsync(EventTimeout);
+
+        Assert.False(rawPasted);
+        Assert.Equal(
+            "整形できませんでした・未整形の文章は画面に保持しています",
+            UserFacingText.ForBackgroundFormatting(result, rawPasted));
+
+        speechToText.Release();
+        await completed.WaitAsync(EventTimeout);
+    }
+
     private static AppSettings LlmEnabled()
         => new() { Llm = new LlmSettings { Enabled = true, RawFirstPaste = true } };
+
+    private static DictationController CreateController(
+        AppSettings settings,
+        ISpeechToTextEngine speechToText,
+        Task<FormatResult> firstFormatResult,
+        ITextOutput output)
+    {
+        var pipeline = new DictationPipeline(
+            new FakeRecorder(),
+            speechToText,
+            new DelayedFirstFormatter(
+                firstFormatResult,
+                new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)),
+            new DictionaryCorrector([]),
+            output,
+            new EmptyDictionaryProvider(),
+            new NullEventLog(),
+            settings);
+        return new DictationController(pipeline, settings);
+    }
 
     private static DictationController CreateController(AppSettings settings, ISpeechToTextEngine speechToText)
     {
@@ -480,14 +607,18 @@ public class DictationControllerTests
         return tcs.Task;
     }
 
-    private static Task<BackgroundFormattingResult> ListenControllerBackground(DictationController controller)
+    private static async Task<BackgroundFormattingResult> ListenControllerBackground(DictationController controller)
+        => (await ListenControllerBackgroundWithPasteState(controller)).Result;
+
+    private static Task<(BackgroundFormattingResult Result, bool RawPasted)> ListenControllerBackgroundWithPasteState(
+        DictationController controller)
     {
-        var tcs = new TaskCompletionSource<BackgroundFormattingResult>(
+        var tcs = new TaskCompletionSource<(BackgroundFormattingResult, bool)>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        void Handler(BackgroundFormattingResult result)
+        void Handler(BackgroundFormattingResult result, bool rawPasted)
         {
             controller.BackgroundFormattingCompleted -= Handler;
-            tcs.TrySetResult(result);
+            tcs.TrySetResult((result, rawPasted));
         }
 
         controller.BackgroundFormattingCompleted += Handler;
