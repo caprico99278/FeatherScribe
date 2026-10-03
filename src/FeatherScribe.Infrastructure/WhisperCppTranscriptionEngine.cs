@@ -70,8 +70,10 @@ public sealed class WhisperCppTranscriptionEngine : ISpeechToTextEngine
             var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
             var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
 
+            // asr.timeoutSeconds is the minimum; long recordings get more time (AsrTimeoutPolicy).
+            var timeoutSeconds = AsrTimeoutPolicy.For(_settings.TimeoutSeconds, audioFile.Duration);
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(_settings.TimeoutSeconds));
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
             try
             {
@@ -83,7 +85,7 @@ public sealed class WhisperCppTranscriptionEngine : ISpeechToTextEngine
 
                 return cancellationToken.IsCancellationRequested
                     ? Failure(stopwatch, "キャンセルされました")
-                    : Failure(stopwatch, $"whisper-cli がタイムアウトしました ({_settings.TimeoutSeconds}秒)");
+                    : Failure(stopwatch, $"whisper-cli がタイムアウトしました ({timeoutSeconds}秒)");
             }
 
             var stderr = await stderrTask.ConfigureAwait(false);

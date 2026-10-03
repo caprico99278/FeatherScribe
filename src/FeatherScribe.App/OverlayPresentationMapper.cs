@@ -21,6 +21,13 @@ internal static class OverlayPresentationMapper
             _ => OverlayPresentation.Hidden,
         };
 
+    /// <summary>
+    /// Transcribing after the recording limit stopped the recording: same state as
+    /// <see cref="PipelineStage.Transcribing"/>, with the reason. The pipeline result replaces it as usual.
+    /// </summary>
+    public static OverlayPresentation FromRecordingLimitReached(RecordingLimitNotice notice)
+        => Persistent(OverlayVisualState.Transcribing, UserFacingText.RecordingLimitTranscribing(notice.LimitSeconds));
+
     public static OverlayPresentation FromPipelineResult(PipelineResult result)
     {
         if (!result.Success)

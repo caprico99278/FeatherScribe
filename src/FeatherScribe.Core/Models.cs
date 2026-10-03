@@ -4,10 +4,17 @@ public sealed record AudioFile(
     string Path,
     TimeSpan Duration);
 
+/// <param name="StoppedAtMaxDuration">True when recording.maxRecordingSeconds stopped the recording
+/// (not the user's hotkey). The UI tells the user once so speech after the limit is not lost silently.</param>
 public sealed record RecordedAudio(
     AudioFile File,
     DateTimeOffset StartedAt,
-    DateTimeOffset FinishedAt);
+    DateTimeOffset FinishedAt,
+    bool StoppedAtMaxDuration = false);
+
+/// <summary>The recording of <paramref name="OperationId"/> was stopped by the recording limit.</summary>
+/// <param name="LimitSeconds">The effective limit (recording.maxRecordingSeconds, at least 1).</param>
+public sealed record RecordingLimitNotice(Guid OperationId, int LimitSeconds);
 
 public sealed record TranscriptionResult(
     string RawText,

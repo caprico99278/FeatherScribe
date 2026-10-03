@@ -437,7 +437,7 @@ Overlay visual states:
 
 - `Hidden`: overlay is not visible.
 - `Recording`: shows `録音中`, a recording-colored indicator, a 4-bar volume-linked level meter (`LevelMeter`, Phase UI-7, Section 24), and elapsed time.
-- `Transcribing`: shows `文字起こし中`.
+- `Transcribing`: shows `文字起こし中`, or `録音上限（{limit}）で停止・文字起こし中` when the recording limit stopped the recording.
 - `Formatting`: shows `整形中` or `貼り付け完了・整形中`.
 - `Pasting`: shows `貼り付け中`.
 - `Completed`: shows a short completion message and auto-hides.
@@ -449,6 +449,7 @@ Pipeline and controller mapping:
 
 - `PipelineStage.Recording` maps to `Recording` and starts the presentation-layer elapsed timer.
 - `PipelineStage.Transcribing` maps to `Transcribing`.
+- `DictationController.RecordingLimitReached` (the recording limit `recording.maxRecordingSeconds` stopped the recording, not the user's hotkey; raised once right after `Transcribing` starts, only for the latest operation) maps to persistent `Transcribing` with `録音上限（{limit}）で停止・文字起こし中` through `OverlayPresentationMapper.FromRecordingLimitReached`, and shows the recording-limit tray notice. The controller moves from `Recording` to `Processing` when it receives this notice (as after a user stop; nothing is cancelled), so hotkey presses while transcribing are ignored and the next press after completion starts a new recording. The pipeline result then replaces the overlay as usual. A normal stop shows nothing extra.
 - `PipelineStage.Formatting` maps to `Formatting`.
 - `PipelineStage.Outputting` maps to `Pasting`.
 - `PipelineStage.Completed` does not decide the final overlay state by itself; the final state comes from `PipelineResult` or `BackgroundFormattingResult`.
@@ -697,12 +698,14 @@ Single source: `UserFacingText` in `src/FeatherScribe.App/UserFacingText.cs` hol
   - background success: `整形完了` / `整形結果は「クリップボードにコピー」または「直前の入力先へ貼り付け」で使えます（自動では置き換えません）。`
   - background rejected: `整形候補があります` / `理由: {display reason}`, a line break, then `未整形の文章は貼り付け済みです。整形候補は画面で確認して採用できます。` (raw paste failed or unknown: `未整形の文章は画面に保持しています。整形候補は画面で確認して採用できます。`)
   - background failed: `整形できませんでした` / `未整形の文章は貼り付け済みです。` (raw paste failed or unknown: `未整形の文章は画面に保持しています。`)
+  - recording limit reached (once, when processing starts; the completion notices still follow): `録音上限に達しました` / `{limit}で録音を自動停止しました。続きは、文字起こしが終わってからもう一度ホットキーを押して録音してください。`
   - startup settings and hotkey notices: unchanged.
+- `{limit}` is `UserFacingText.RecordingLimitLabel(recording.maxRecordingSeconds)`: whole minutes `5分`, under two minutes in seconds `90秒`, otherwise `2分30秒`.
 - At dictation completion the notice is chosen by `UserFacingText.CompletionNotice` with the same priority as StatusText and the overlay: failure → paste failed → fallback. A successful raw-first result (background formatting started) shows no notice at completion; the background result notifies later.
 
 ### RecordingOverlay text
 
-States and durations are unchanged. Text: Formatting `整形中`, raw pasted with background formatting `貼り付け完了・整形中`, fallback `未整形の文章を使用しました`, paste failed `結果は画面に保持しています`.
+States and durations are unchanged. Text: Formatting `整形中`, raw pasted with background formatting `貼り付け完了・整形中`, fallback `未整形の文章を使用しました`, paste failed `結果は画面に保持しています`, transcribing after the recording limit stopped the recording `録音上限（{limit}）で停止・文字起こし中` (e.g. `録音上限（5分）で停止・文字起こし中`).
 
 `FromPipelineResult` checks a failed paste before the raw-first and fallback states (order: failed → paste failed `Warning` → background formatting `Formatting` → fallback → completed), matching StatusText, so a raw-first paste that did not happen shows the `Warning` state instead of `貼り付け完了・整形中` (see Section 19).
 
@@ -728,10 +731,10 @@ Ctrl+Shift+F11　丁寧文
 Ctrl+Shift+F12　箇条書き
 Ctrl+Alt+Shift+M　メモ
 Ctrl+Alt+Shift+D　開発指示
-LLM整形: オン
+LLM整形: オン（gemma4:e2b）
 ```
 
-The hotkeys are the configured ones. With LLM formatting disabled the last line is `LLM整形: オフ（どのキーでも未整形で入力します）`. Each hotkey that could not be registered adds one line: `⚠ {hotkey}（{mode label}）は使えません: {reason}`.
+The hotkeys are the configured ones. With LLM formatting enabled the last line names the model in use (`LLM整形: オン（{model}）`, e.g. the model chosen in the launcher). With LLM formatting disabled the last line is `LLM整形: オフ（どのキーでも未整形で入力します）`. Each hotkey that could not be registered adds one line: `⚠ {hotkey}（{mode label}）は使えません: {reason}`.
 
 ### Action availability
 

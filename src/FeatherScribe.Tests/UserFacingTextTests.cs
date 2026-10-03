@@ -313,7 +313,7 @@ public sealed class UserFacingTextTests
     [Fact]
     public void OperationGuide_IsCompactAndHasNoConfigKeys()
     {
-        var guide = UserFacingText.OperationGuide(new HotkeySettings(), llmEnabled: true, FormattingMode.Polite);
+        var guide = UserFacingText.OperationGuide(new HotkeySettings(), llmEnabled: true, FormattingMode.Polite, "gemma4:e2b");
 
         Assert.Equal(
             "キーを押して録音、もう一度押して停止します。\n" +
@@ -325,17 +325,29 @@ public sealed class UserFacingTextTests
             "Ctrl+Alt+Shift+M　メモ\n" +
             "Ctrl+Alt+Shift+D　開発指示\n" +
             "Ctrl+Shift+F7　選択テキストを編集（丁寧文）\n" +
-            "LLM整形: オン",
+            "LLM整形: オン（gemma4:e2b）",
             guide);
         Assert.DoesNotContain("llm.enabled", guide);
         Assert.DoesNotContain("\t", guide);
+    }
+
+    [Theory]
+    [InlineData(true, "gemma4:e2b", "LLM整形: オン（gemma4:e2b）")]
+    [InlineData(true, "hf.co/org/model-1.5B-GGUF:Q5_K_M", "LLM整形: オン（hf.co/org/model-1.5B-GGUF:Q5_K_M）")]
+    [InlineData(true, null, "LLM整形: オン")]
+    [InlineData(true, " ", "LLM整形: オン")]
+    [InlineData(false, "gemma4:e2b", "LLM整形: オフ（どのキーでも未整形で入力します）")]
+    [InlineData(false, null, "LLM整形: オフ（どのキーでも未整形で入力します）")]
+    public void GuideLlmLine_ShowsModelOnlyWhenOn(bool llmEnabled, string? model, string expected)
+    {
+        Assert.Equal(expected, UserFacingText.GuideLlmLine(llmEnabled, model));
     }
 
     [Fact]
     public void OperationGuide_UsesConfiguredHotkeysAndLlmOff()
     {
         var hotkeys = new HotkeySettings { NoFormat = "Ctrl+Alt+1", Memo = "Ctrl+Alt+9", EditSelection = "Ctrl+Alt+E" };
-        var lines = UserFacingText.OperationGuide(hotkeys, llmEnabled: false, FormattingMode.Bullet).Split('\n');
+        var lines = UserFacingText.OperationGuide(hotkeys, llmEnabled: false, FormattingMode.Bullet, "gemma4:e2b").Split('\n');
 
         Assert.Equal(10, lines.Length);
         Assert.Equal("Ctrl+Alt+1　未整形", lines[1]);

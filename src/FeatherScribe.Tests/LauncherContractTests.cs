@@ -10,6 +10,7 @@ public sealed class LauncherContractTests
 {
     private const string LauncherFileName = "FeatherScribe.cmd";
     private const string AppProjectRelativePath = "src/FeatherScribe.App/FeatherScribe.App.csproj";
+    private const string LauncherProjectRelativePath = "src/FeatherScribe.Launcher/FeatherScribe.Launcher.csproj";
 
     private static readonly Regex AbsoluteDrivePath = new(@"[A-Za-z]:\\", RegexOptions.CultureInvariant);
 
@@ -75,7 +76,7 @@ public sealed class LauncherContractTests
     }
 
     [Fact]
-    public void Launcher_ContainsSingleInstanceCheckDryRunReleaseBuildAndStart()
+    public void Launcher_ContainsSingleInstanceCheckDryRunAndReleaseBuilds()
     {
         var root = FindRepoRoot();
         if (root is null)
@@ -84,14 +85,68 @@ public sealed class LauncherContractTests
         }
 
         var text = File.ReadAllText(Path.Combine(root, LauncherFileName));
+        var lines = text.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
 
-        var tasklistLine = text.Split('\n').FirstOrDefault(line => line.Contains("tasklist", StringComparison.OrdinalIgnoreCase));
-        Assert.NotNull(tasklistLine);
-        Assert.Contains("FeatherScribe.App.exe", tasklistLine, StringComparison.Ordinal);
+        var tasklistIndex = Array.FindIndex(lines, line => line.Contains("tasklist", StringComparison.OrdinalIgnoreCase));
+        Assert.True(tasklistIndex >= 0, "Single-instance check (tasklist) is missing.");
+        Assert.Contains("FeatherScribe.App.exe", lines[tasklistIndex], StringComparison.Ordinal);
 
         Assert.Contains("FEATHERSCRIBE_LAUNCH_DRY_RUN", text, StringComparison.Ordinal);
-        Assert.Contains("-c Release", text, StringComparison.Ordinal);
-        Assert.Contains("start \"\"", text, StringComparison.Ordinal);
+
+        // Both projects are built explicitly in Release (the launcher must not reference the WPF App).
+        var appBuildIndex = Array.FindIndex(lines, line =>
+            line.StartsWith("dotnet build \"%FS_PROJECT%\" -c Release", StringComparison.Ordinal));
+        var launcherBuildIndex = Array.FindIndex(lines, line =>
+            line.StartsWith("dotnet build \"%FS_LAUNCHER_PROJECT%\" -c Release", StringComparison.Ordinal));
+        Assert.True(appBuildIndex >= 0, "App Release build line is missing.");
+        Assert.True(launcherBuildIndex >= 0, "Launcher Release build line is missing.");
+        Assert.Contains($"set \"FS_PROJECT={AppProjectRelativePath.Replace('/', '\\')}\"", lines);
+        Assert.Contains($"set \"FS_LAUNCHER_PROJECT={LauncherProjectRelativePath.Replace('/', '\\')}\"", lines);
+
+        // The single-instance check runs before anything is built.
+        Assert.True(tasklistIndex < appBuildIndex && tasklistIndex < launcherBuildIndex);
+
+        // The launcher runs in this console (no start), gets the App exe and passes every argument through.
+        var invocationIndex = Array.FindIndex(lines, line =>
+            line.StartsWith("\"%FS_LAUNCHER_EXE%\"", StringComparison.Ordinal));
+        Assert.True(invocationIndex > launcherBuildIndex, "Launcher invocation is missing or before the build.");
+        Assert.Equal("\"%FS_LAUNCHER_EXE%\" --app \"%FS_EXE%\" %*", lines[invocationIndex]);
+        Assert.DoesNotContain(lines, line => line.TrimStart().StartsWith("start ", StringComparison.OrdinalIgnoreCase));
+
+        // Exit with the launcher's exit code; pause on non-zero so the message can be read.
+        Assert.Equal("set \"FS_EXIT=%ERRORLEVEL%\"", lines[invocationIndex + 1]);
+        Assert.Contains("if not \"%FS_EXIT%\"==\"0\" pause", lines);
+        Assert.Contains("exit /b %FS_EXIT%", lines);
+    }
+
+    [Fact]
+    public void Launcher_ConsoleLauncherPathMatchesLauncherProjectOutput()
+    {
+        var root = FindRepoRoot();
+        if (root is null)
+        {
+            return;
+        }
+
+        var project = XDocument.Load(Path.Combine(root, LauncherProjectRelativePath));
+        var targetFramework = project.Descendants("TargetFramework").Select(element => element.Value.Trim()).FirstOrDefault();
+        Assert.False(string.IsNullOrEmpty(targetFramework), "Launcher csproj has no TargetFramework.");
+        var assemblyName = project.Descendants("AssemblyName").Select(element => element.Value.Trim()).FirstOrDefault();
+        Assert.Equal("FeatherScribe.Launcher", assemblyName);
+        Assert.Equal("Exe", project.Descendants("OutputType").Select(element => element.Value.Trim()).FirstOrDefault());
+
+        // The console launcher must not reference the WPF App project.
+        Assert.DoesNotContain(
+            project.Descendants("ProjectReference").Select(element => (string?)element.Attribute("Include") ?? ""),
+            include => include.Contains("FeatherScribe.App", StringComparison.OrdinalIgnoreCase));
+
+        var lines = File.ReadAllText(Path.Combine(root, LauncherFileName)).Split('\n').Select(line => line.TrimEnd('\r'));
+        Assert.Contains(
+            $@"set ""FS_LAUNCHER_EXE=src\FeatherScribe.Launcher\bin\Release\{targetFramework}\{assemblyName}.exe""",
+            lines);
+
+        var solution = File.ReadAllText(Path.Combine(root, "FeatherScribe.slnx"));
+        Assert.Contains($"<Project Path=\"{LauncherProjectRelativePath}\" />", solution, StringComparison.Ordinal);
     }
 
     [Fact]

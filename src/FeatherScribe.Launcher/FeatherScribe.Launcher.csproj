@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Console launcher started by FeatherScribe.cmd: asks whether to use LLM formatting, starts the
+    repo-local Ollama and loads the chosen model when needed, then starts FeatherScribe.App.exe.
+    It must not reference the WPF App project (FeatherScribe.cmd builds both explicitly).
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <AssemblyName>FeatherScribe.Launcher</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FeatherScribe.Core\FeatherScribe.Core.csproj" />
+    <ProjectReference Include="..\FeatherScribe.Infrastructure\FeatherScribe.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="FeatherScribe.Tests" />
+  </ItemGroup>
+
+</Project>

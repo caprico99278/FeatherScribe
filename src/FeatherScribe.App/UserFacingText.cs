@@ -55,6 +55,7 @@ internal static class UserFacingText
     public const string NotifyBackgroundFailedTitle = "整形できませんでした";
     public const string NotifyBackgroundFailedBody = "未整形の文章は貼り付け済みです。";
     public const string NotifyBackgroundFailedBodyRawNotPasted = "未整形の文章は画面に保持しています。";
+    public const string NotifyRecordingLimitTitle = "録音上限に達しました";
 
     // --- Operation guide ---
     public const string GuideIntro = "キーを押して録音、もう一度押して停止します。";
@@ -223,6 +224,31 @@ internal static class UserFacingText
             : null;
     }
 
+    /// <summary>
+    /// The recording limit as the user reads it: whole minutes 「5分」, under two minutes in seconds 「90秒」,
+    /// otherwise minutes and seconds 「2分30秒」. Values below 1 are shown as 1 second (the recorder minimum).
+    /// </summary>
+    public static string RecordingLimitLabel(int seconds)
+    {
+        var value = Math.Max(1, seconds);
+        if (value % 60 == 0)
+        {
+            return $"{value / 60}分";
+        }
+
+        return value < 120 ? $"{value}秒" : $"{value / 60}分{value % 60}秒";
+    }
+
+    /// <summary>Overlay text while transcribing a recording the limit stopped.</summary>
+    public static string RecordingLimitTranscribing(int limitSeconds)
+        => $"録音上限（{RecordingLimitLabel(limitSeconds)}）で停止・文字起こし中";
+
+    /// <summary>Tray notice shown once when the recording limit stopped the recording.</summary>
+    public static TrayNotice RecordingLimitTrayNotice(int limitSeconds)
+        => new(
+            NotifyRecordingLimitTitle,
+            $"{RecordingLimitLabel(limitSeconds)}で録音を自動停止しました。続きは、文字起こしが終わってからもう一度ホットキーを押して録音してください。");
+
     /// <param name="rawPasted">Same meaning as in <see cref="ForBackgroundFormatting"/>.</param>
     public static string NotifyBackgroundRejectedBody(BackgroundFormattingResult result, bool rawPasted)
     {
@@ -234,11 +260,18 @@ internal static class UserFacingText
     public static string NotifyBackgroundFailedBodyFor(bool rawPasted)
         => rawPasted ? NotifyBackgroundFailedBody : NotifyBackgroundFailedBodyRawNotPasted;
 
+    /// <summary>The LLM formatting state line: 「LLM整形: オン（{model}）」 when on (model omitted when unknown), otherwise the off text.</summary>
+    public static string GuideLlmLine(bool llmEnabled, string? llmModel)
+        => !llmEnabled ? GuideLlmOff
+            : string.IsNullOrWhiteSpace(llmModel) ? GuideLlmOn
+            : $"{GuideLlmOn}（{llmModel.Trim()}）";
+
     /// <summary>
     /// Compact operation guide: one hotkey per line, the selected-text editing hotkey (omitted when it is
-    /// disabled), then the LLM formatting state.
+    /// disabled), then the LLM formatting state with the model when on.
     /// </summary>
-    public static string OperationGuide(HotkeySettings hotkeys, bool llmEnabled, FormattingMode selectionEditMode)
+    public static string OperationGuide(
+        HotkeySettings hotkeys, bool llmEnabled, FormattingMode selectionEditMode, string? llmModel = null)
     {
         var builder = new StringBuilder(GuideIntro);
         foreach (var (mode, hotkey) in GuideHotkeys(hotkeys))
@@ -251,7 +284,7 @@ internal static class UserFacingText
             builder.Append('\n').Append(SelectionEditGuideLine(hotkeys.EditSelection, selectionEditMode));
         }
 
-        builder.Append('\n').Append(llmEnabled ? GuideLlmOn : GuideLlmOff);
+        builder.Append('\n').Append(GuideLlmLine(llmEnabled, llmModel));
         return builder.ToString();
     }
 

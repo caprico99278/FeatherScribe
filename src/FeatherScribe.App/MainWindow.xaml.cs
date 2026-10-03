@@ -55,7 +55,7 @@ public partial class MainWindow : Window
         OperationGuideExpander.Collapsed += (_, _) => FitHeightToContent();
 
         HotkeyHelpText.Text = UserFacingText.OperationGuide(
-            settings.Hotkeys, settings.Llm.Enabled, settings.SelectionEdit.ParsedMode);
+            settings.Hotkeys, settings.Llm.Enabled, settings.SelectionEdit.ParsedMode, settings.Llm.Model);
     }
 
     public void UpdateStage(PipelineStage stage, string? message)

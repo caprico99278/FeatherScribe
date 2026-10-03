@@ -38,6 +38,13 @@ public sealed class DictationController
     /// </summary>
     public event Action<BackgroundFormattingResult, bool>? BackgroundFormattingCompleted;
 
+    /// <summary>
+    /// The recording limit stopped the latest dictation's recording (raised once, when processing starts).
+    /// The controller has moved from Recording to Processing (as after a user stop), so hotkey presses during
+    /// processing are ignored and the next press after completion starts a new recording. Raised from a worker thread.
+    /// </summary>
+    public event Action<RecordingLimitNotice>? RecordingLimitReached;
+
     /// <summary>直近結果 (コピー/貼り付け用)。バックグラウンド整形成功時は整形結果で更新される。</summary>
     public string? LastResult { get; private set; }
 
@@ -57,6 +64,28 @@ public sealed class DictationController
         _pipeline = pipeline;
         _settings = settings;
         _pipeline.BackgroundFormattingCompleted += OnBackgroundFormattingCompleted;
+        _pipeline.RecordingLimitReached += OnRecordingLimitReached;
+    }
+
+    private void OnRecordingLimitReached(RecordingLimitNotice notice)
+    {
+        lock (_gate)
+        {
+            if (notice.OperationId != _latestOperationId)
+            {
+                return;
+            }
+
+            // The recorder stopped by itself: the dictation is processing now, the same state as after a
+            // user stop. Otherwise the user's next hotkey press would be consumed as "stop" and lost.
+            // Nothing is cancelled; _stopRecordingCts is disposed when the run completes, as usual.
+            if (_state == State.Recording)
+            {
+                _state = State.Processing;
+            }
+        }
+
+        RecordingLimitReached?.Invoke(notice);
     }
 
     private void OnBackgroundFormattingCompleted(BackgroundFormattingResult result)

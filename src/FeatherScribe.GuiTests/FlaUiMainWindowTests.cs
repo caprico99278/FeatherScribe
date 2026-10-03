@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
@@ -53,7 +54,7 @@ public sealed class FlaUiMainWindowTests
             SetExpandedByClick(window, "OperationGuideExpander", expanded: false);
             AssertFitsWithoutScrolling(window, "both collapsed again");
 
-            window.Focus();
+            EnsureForeground(window, automation);
             Assert.True(window.Properties.HasKeyboardFocus.Value || window.Properties.IsKeyboardFocusable.Value);
         }
         finally
@@ -70,47 +71,63 @@ public sealed class FlaUiMainWindowTests
     public void MainWindow_FlaUiContract_ActionsDisabledAtStartupAndTabReachesResultThenCandidateHeader()
     {
         var appPath = FindAppExecutable();
-        using var app = Application.Launch(appPath);
-        using var automation = new UIA3Automation();
 
-        try
+        // Keys are only sent while FeatherScribe owns the foreground. If another process takes
+        // the foreground mid-sequence, the sequence restarts from a fresh launch: the startup
+        // focus on the window root is the defined start state, and UI Automation cannot move
+        // focus back to the window root once a child element has it.
+        for (var sequence = 0; sequence <= MaxKeyboardSequenceRetries; sequence++)
         {
-            var window = app.GetMainWindow(automation, TimeSpan.FromSeconds(10));
-            Assert.NotNull(window);
-            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(500));
+            using var app = Application.Launch(appPath);
+            using var automation = new UIA3Automation();
 
-            // No result yet: nothing to copy, paste, reformat or adopt.
-            AssertVisibleButtonsInitialState(window);
-
-            window.SetForeground();
-            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(300));
-
-            // StatusText is not a tab stop: the first Tab lands on the latest result.
-            Keyboard.Type(VirtualKeyShort.TAB);
-            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(250));
-            Assert.True(
-                FindRequired(window, "LastResultText").Properties.HasKeyboardFocus.Value,
-                $"First Tab must focus LastResultText, but focus is on '{DescribeFocus(automation)}'.");
-
-            Keyboard.Type(VirtualKeyShort.TAB);
-            Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(250));
-            var candidateHeader = FindRequired(window, "CandidateExpander")
-                .FindFirstDescendant(cf => cf.ByControlType(ControlType.Button))
-                ?? throw new InvalidOperationException("CandidateExpander header button was not found.");
-            Assert.True(
-                candidateHeader.Properties.HasKeyboardFocus.Value,
-                $"Second Tab must focus the CandidateExpander header, but focus is on '{DescribeFocus(automation)}'.");
-
-            AssertFitsWithoutScrolling(window, "after keyboard navigation");
-        }
-        finally
-        {
-            app.Close();
-            if (!app.HasExited)
+            try
             {
-                app.Kill();
+                var window = app.GetMainWindow(automation, TimeSpan.FromSeconds(10));
+                Assert.NotNull(window);
+                Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(500));
+
+                // No result yet: nothing to copy, paste, reformat or adopt.
+                AssertVisibleButtonsInitialState(window);
+
+                var lastResult = FindRequired(window, "LastResultText");
+                var candidateHeader = FindRequired(window, "CandidateExpander")
+                    .FindFirstDescendant(cf => cf.ByControlType(ControlType.Button))
+                    ?? throw new InvalidOperationException("CandidateExpander header button was not found.");
+
+                EnsureForeground(window, automation);
+                Assert.True(
+                    PollUntil(() => window.Properties.HasKeyboardFocus.ValueOrDefault, FocusPollTimeout),
+                    $"Precondition failed: the window root must have keyboard focus before the first Tab, but focus is on '{DescribeFocus(automation)}'.");
+                Wait.UntilInputIsProcessed(TimeSpan.FromMilliseconds(300));
+
+                // StatusText is not a tab stop: the first Tab lands on the latest result.
+                if (!TryTabTo(window, automation, lastResult, "First Tab must focus LastResultText"))
+                {
+                    continue;
+                }
+
+                if (!TryTabTo(window, automation, candidateHeader, "Second Tab must focus the CandidateExpander header"))
+                {
+                    continue;
+                }
+
+                AssertFitsWithoutScrolling(window, "after keyboard navigation");
+                return;
+            }
+            finally
+            {
+                app.Close();
+                if (!app.HasExited)
+                {
+                    app.Kill();
+                }
             }
         }
+
+        Assert.Fail(
+            $"Precondition failed: another process took the foreground during each of {MaxKeyboardSequenceRetries + 1} "
+            + $"keyboard sequences. Foreground owner: {DescribeForegroundWindow()}.");
     }
 
     [Fact]
@@ -160,7 +177,166 @@ public sealed class FlaUiMainWindowTests
         }
     }
 
-    private static string DescribeFocus(UIA3Automation automation)
+    private const int ForegroundAttempts = 5;
+    private const int MaxKeyboardSequenceRetries = 2;
+    private static readonly TimeSpan ForegroundPollTimeout = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan FocusPollTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>
+    /// Precondition for any input or focus-dependent assert: the FeatherScribe window is the
+    /// foreground window and UIA focus was set on its root. Windows silently refuses
+    /// SetForegroundWindow (foreground lock) while another process owns the foreground and the
+    /// test process did not receive the last input, so a plain SetForeground() is not enough.
+    /// Each attempt calls FlaUI SetForeground(); if that is refused, the standard minimal
+    /// workaround is applied (<see cref="ForceForegroundWindow"/>). Fails as a precondition,
+    /// naming the foreground owner, instead of letting a later focus-order assert fail.
+    /// </summary>
+    private static void EnsureForeground(Window window, AutomationBase automation)
+    {
+        var handle = window.Properties.NativeWindowHandle.Value;
+        for (var attempt = 1; attempt <= ForegroundAttempts; attempt++)
+        {
+            window.SetForeground();
+            if (GetForegroundWindow() != handle)
+            {
+                ForceForegroundWindow(handle);
+            }
+
+            if (PollUntil(() => GetForegroundWindow() == handle && TryFocus(window), ForegroundPollTimeout))
+            {
+                return;
+            }
+        }
+
+        Assert.Fail(
+            $"Precondition failed: FeatherScribe could not be brought to the foreground after {ForegroundAttempts} attempts, "
+            + $"so no input was sent. Foreground owner: {DescribeForegroundWindow()}. Focus: '{DescribeFocus(automation)}'.");
+    }
+
+    /// <summary>
+    /// Standard foreground-lock workaround: restore a minimized window, then temporarily attach
+    /// this thread to the foreground window's input queue so SetForegroundWindow is permitted.
+    /// AttachThreadInput is used rather than a synthetic ALT key so that no keystroke can ever
+    /// reach the application that currently owns the foreground.
+    /// </summary>
+    private static void ForceForegroundWindow(IntPtr handle)
+    {
+        if (IsIconic(handle))
+        {
+            ShowWindow(handle, ShowWindowRestore);
+        }
+
+        var foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
+        var currentThread = GetCurrentThreadId();
+        var attached = foregroundThread != 0
+            && foregroundThread != currentThread
+            && AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
+            BringWindowToTop(handle);
+            SetForegroundWindow(handle);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
+        }
+    }
+
+    private static bool TryFocus(AutomationElement element)
+    {
+        try
+        {
+            element.Focus();
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsForeground(Window window)
+        => GetForegroundWindow() == window.Properties.NativeWindowHandle.Value;
+
+    /// <summary>
+    /// Sends one Tab only while FeatherScribe owns the foreground, then polls until
+    /// <paramref name="expected"/> has keyboard focus. Returns false (nothing asserted) when the
+    /// foreground was lost before or while the key was handled, so the caller restarts the
+    /// sequence. Fails with the descriptive message when focus landed elsewhere in FeatherScribe.
+    /// </summary>
+    private static bool TryTabTo(Window window, AutomationBase automation, AutomationElement expected, string expectation)
+    {
+        if (!IsForeground(window))
+        {
+            return false;
+        }
+
+        Keyboard.Type(VirtualKeyShort.TAB);
+        if (PollUntil(() => expected.Properties.HasKeyboardFocus.ValueOrDefault, FocusPollTimeout))
+        {
+            return true;
+        }
+
+        if (!IsForeground(window))
+        {
+            return false;
+        }
+
+        Assert.Fail($"{expectation}, but focus is on '{DescribeFocus(automation)}'.");
+        return false;
+    }
+
+    private static bool PollUntil(Func<bool> condition, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (true)
+        {
+            if (condition())
+            {
+                return true;
+            }
+
+            if (stopwatch.Elapsed >= timeout)
+            {
+                return false;
+            }
+
+            Thread.Sleep(PollInterval);
+        }
+    }
+
+    private static string DescribeForegroundWindow()
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero)
+        {
+            return "(none)";
+        }
+
+        var title = new StringBuilder(256);
+        GetWindowText(foreground, title, title.Capacity);
+        var className = new StringBuilder(256);
+        GetClassName(foreground, className, className.Capacity);
+        GetWindowThreadProcessId(foreground, out var processId);
+        string processName;
+        try
+        {
+            using var process = Process.GetProcessById((int)processId);
+            processName = process.ProcessName;
+        }
+        catch (Exception)
+        {
+            processName = "(unknown)";
+        }
+
+        return $"title='{title}' class='{className}' process={processName} (pid {processId})";
+    }
+
+    private static string DescribeFocus(AutomationBase automation)
     {
         var focused = automation.FocusedElement();
         if (focused is null)
@@ -245,6 +421,8 @@ public sealed class FlaUiMainWindowTests
         }
         else
         {
+            // A real mouse click is input: never send it while another process owns the foreground.
+            EnsureForeground(window, window.Automation);
             headerButton.Click();
         }
 
@@ -328,6 +506,37 @@ public sealed class FlaUiMainWindowTests
     }
 
     private const uint MonitorDefaultToNearest = 2;
+    private const int ShowWindowRestore = 9;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint attachThreadId, uint attachToThreadId, bool attach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(

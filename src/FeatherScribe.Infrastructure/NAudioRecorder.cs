@@ -43,6 +43,7 @@ public sealed class NAudioRecorder : IAudioRecorder
         };
 
         var writer = new WaveFileWriter(wavPath, waveIn.WaveFormat);
+        var stoppedAtMaxDuration = false;
         try
         {
             waveIn.DataAvailable += (_, e) =>
@@ -64,7 +65,14 @@ public sealed class NAudioRecorder : IAudioRecorder
                 TimeSpan.FromSeconds(Math.Max(1, _settings.MaxRecordingSeconds)));
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken, maxDurationCts.Token);
-            await using var registration = linked.Token.Register(() => waveIn.StopRecording());
+            // The linked callback runs once, for whichever signal came first: only a limit stop is reported.
+            await using var registration = linked.Token.Register(() =>
+            {
+                stoppedAtMaxDuration = IsMaxDurationStop(
+                    userStopRequested: cancellationToken.IsCancellationRequested,
+                    maxDurationElapsed: maxDurationCts.IsCancellationRequested);
+                waveIn.StopRecording();
+            });
 
             var deviceError = await stopped.Task.ConfigureAwait(false);
             if (deviceError is not null)
@@ -88,8 +96,16 @@ public sealed class NAudioRecorder : IAudioRecorder
         return new RecordedAudio(
             new AudioFile(wavPath, LastDuration),
             startedAt,
-            DateTimeOffset.Now);
+            DateTimeOffset.Now,
+            stoppedAtMaxDuration);
     }
+
+    /// <summary>
+    /// Stop reason when the first stop signal fires: the recording limit counts only when the user had not
+    /// already asked to stop (a hotkey press that wins the race is a normal stop, with no notice).
+    /// </summary>
+    internal static bool IsMaxDurationStop(bool userStopRequested, bool maxDurationElapsed)
+        => maxDurationElapsed && !userStopRequested;
 
     private TimeSpan LastDuration { get; set; }
 

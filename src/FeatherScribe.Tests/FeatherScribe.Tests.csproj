@@ -24,6 +24,7 @@
     <ProjectReference Include="..\FeatherScribe.App\FeatherScribe.App.csproj" />
     <ProjectReference Include="..\FeatherScribe.Core\FeatherScribe.Core.csproj" />
     <ProjectReference Include="..\FeatherScribe.Infrastructure\FeatherScribe.Infrastructure.csproj" />
+    <ProjectReference Include="..\FeatherScribe.Launcher\FeatherScribe.Launcher.csproj" />
   </ItemGroup>
 
   <ItemGroup>

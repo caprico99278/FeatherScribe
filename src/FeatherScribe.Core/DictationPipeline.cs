@@ -60,6 +60,12 @@ public sealed class DictationPipeline : IDisposable
     /// <summary>バックグラウンド整形の完了 (成功/失敗) 通知。ワーカースレッドから発火する。</summary>
     public event Action<BackgroundFormattingResult>? BackgroundFormattingCompleted;
 
+    /// <summary>
+    /// The recording limit stopped the recording (not the user). Raised once per run, right after
+    /// <see cref="PipelineStage.Transcribing"/> starts, so the UI can tell the user when processing begins.
+    /// </summary>
+    public event Action<RecordingLimitNotice>? RecordingLimitReached;
+
     public DictationPipeline(
         IAudioRecorder recorder,
         ISpeechToTextEngine speechToText,
@@ -103,6 +109,22 @@ public sealed class DictationPipeline : IDisposable
 
             // 2. 文字起こし
             StageChanged?.Invoke(PipelineStage.Transcribing, null);
+            if (recorded.StoppedAtMaxDuration)
+            {
+                // Metadata only: the audio duration, never the content.
+                LogEvent("recording_max_duration", true, null,
+                    (long)recorded.File.Duration.TotalMilliseconds, mode, charCount: 0);
+                try
+                {
+                    RecordingLimitReached?.Invoke(new RecordingLimitNotice(
+                        runId, Math.Max(1, _settings.Recording.MaxRecordingSeconds)));
+                }
+                catch (Exception)
+                {
+                    // The notice is informational: a failing subscriber must not lose the recorded speech.
+                }
+            }
+
             var transcription = await _speechToText
                 .TranscribeAsync(recorded.File, cancellationToken)
                 .ConfigureAwait(false);
